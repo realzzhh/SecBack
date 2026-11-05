@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SecBack</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 登录视图：和主界面同一个 WebView，登录成功后切走 -->
+<div id="login" class="login">
+  <div class="login-card">
+    <div class="login-mark">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8.5 10V7a3.5 3.5 0 0 1 7 0v3"/></svg>
+    </div>
+    <h1 class="login-title">SecBack</h1>
+    <p class="login-sub">本地密码本</p>
+
+    <input id="login-pwd" class="login-input" type="password"
+           placeholder="主密码" autocomplete="off" spellcheck="false">
+    <button id="login-go" class="login-btn">进 入</button>
+
+    <p id="login-hint" class="login-hint"></p>
+  </div>
+</div>
+
+<div id="app" hidden>
+
+  <!-- 顶部工具栏 -->
+  <header class="toolbar">
+    <div class="search">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M10.8 10.8 14 14"/></svg>
+      <input id="q" type="search" placeholder="搜索项目或账号" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="spacer"></div>
+
+    <button class="tool" id="btn-new" title="新增项目 (Ctrl+N)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+      <span>新增</span>
+    </button>
+    <button class="tool" id="btn-up" title="上移 (Ctrl+Up)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12V4M4 8l4-4 4 4"/></svg>
+    </button>
+    <button class="tool" id="btn-down" title="下移 (Ctrl+Down)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4v8M4 8l4 4 4-4"/></svg>
+    </button>
+
+    <div class="divider"></div>
+
+    <button class="tool" id="btn-import" title="从另一台机器导入">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 12v2h10v-2"/></svg>
+    </button>
+    <button class="tool" id="btn-lock" title="锁定">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>
+    </button>
+  </header>
+
+  <!-- 左列表 + 右详情 -->
+  <div class="body">
+
+    <aside class="sidebar">
+      <div class="list" id="list"></div>
+      <div class="empty" id="list-empty" hidden>
+        <div class="empty-title">还没有项目</div>
+        <div class="empty-sub">点右上角「新增」建第一个</div>
+      </div>
+      <footer class="count" id="count"></footer>
+    </aside>
+
+    <main class="detail" id="detail">
+      <div class="placeholder" id="placeholder">
+        <div class="ph-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8.5 10V7a3.5 3.5 0 0 1 7 0v3"/></svg>
+        </div>
+        <div class="ph-text">在左侧选择一个项目</div>
+      </div>
+
+      <div class="pane" id="pane" hidden>
+        <div class="pane-head">
+          <div>
+            <h1 id="p-name"></h1>
+            <p id="p-remark" class="p-remark"></p>
+          </div>
+          <div class="pane-actions">
+            <button class="btn ghost" id="btn-edit">编辑</button>
+            <button class="btn danger-ghost" id="btn-delete">删除</button>
+          </div>
+        </div>
+
+        <div class="slots" id="slots"></div>
+
+        <div class="meta" id="p-meta"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- 新增 / 编辑弹层 -->
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2 id="modal-title">新增项目</h2>
+      <button class="icon-btn" id="modal-x" title="关闭">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <label class="field">
+        <span>项目名称</span>
+        <input id="m-name" maxlength="60" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>备注</span>
+        <input id="m-remark" maxlength="120" autocomplete="off">
+      </label>
+
+      <div class="slots-edit" id="m-slots"></div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn ghost" id="modal-cancel">取消</button>
+      <button class="btn primary" id="modal-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 危险操作确认。删除是不可逆的，必须先问一句 -->
+<div class="overlay" id="confirm" hidden>
+  <div class="modal narrow" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>删除项目</h2>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text">确定删除「<b id="confirm-name"></b>」吗？</p>
+      <p class="confirm-note">这个项目名下的所有账户和密码会一起删掉，无法撤销。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="confirm-cancel">取消</button>
+      <button class="btn danger" id="confirm-ok">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入：输对方机器的密码 -->
+<div class="overlay" id="ipwd" hidden>
+  <div class="modal narrow" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>导入密库</h2>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text">请输入 <b id="ipwd-file"></b> 的主密码</p>
+      <label class="field">
+        <span>对方机器上这个密库的密码</span>
+        <input id="ipwd-input" type="password" autocomplete="off">
+      </label>
+      <p class="confirm-note" id="ipwd-err"></p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="ipwd-cancel">取消</button>
+      <button class="btn primary" id="ipwd-ok">解锁</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入：预览与勾选 -->
+<div class="overlay" id="imp" hidden>
+  <div class="modal wide" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>导入预览</h2>
+      <button class="icon-btn" id="imp-x" title="关闭">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </div>
+    <div class="modal-body imp-body">
+      <p class="imp-src">来自 <b id="imp-file"></b></p>
+      <p class="imp-sum" id="imp-sum"></p>
+      <div class="imp-tree" id="imp-tree"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="imp-cancel">取消</button>
+      <button class="btn primary" id="imp-ok">开始导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改主密码 -->
+<div class="overlay" id="pwd" hidden>
+  <div class="modal narrow" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>修改主密码</h2>
+    </div>
+    <div class="modal-body">
+      <label class="field">
+        <span>当前密码</span>
+        <input id="pwd-old" type="password" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>新密码</span>
+        <input id="pwd-new" type="password" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>确认新密码</span>
+        <input id="pwd-new2" type="password" autocomplete="off">
+      </label>
+      <p class="confirm-note" id="pwd-err"></p>
+      <p class="confirm-note">改完之后，别的机器上那份密库仍然是原来的密码——两台机器各用各的。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="pwd-cancel">取消</button>
+      <button class="btn primary" id="pwd-ok">修改</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

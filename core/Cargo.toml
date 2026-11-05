@@ -1,0 +1,21 @@
+[package]
+name = "secback-core"
+version = "0.1.0"
+edition = "2021"
+description = "SecBack 密码本核心：格式、加密、读写。不依赖任何 GUI 框架。"
+
+[dependencies]
+aes-gcm = "0.10"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+sha2 = "0.10"
+getrandom = "0.2"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+hex = "0.4"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"
