@@ -10,6 +10,7 @@
   --accent-hover: #14528f;
   --accent-weak: #eaf2fb;
   --accent-line: #bcd6ee;
+  --green: #1c5f3e;
   --green-bg: #eef8f1;
   --green-line: #cfe8d8;
   --danger: #b4453c;
@@ -882,4 +883,195 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   text-align: center;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* ============================================================
+   深色主题
+   ------------------------------------------------------------
+   只覆盖颜色，不动任何布局和尺寸。选择器统一带 [data-theme="dark"]，
+   特异性高于原来的类选择器，所以不需要 !important。
+
+   配色原则：不用纯黑底、不用纯白字。纯黑 #000 配纯白 #fff 对比过强，
+   长时间看反而累眼；这里用偏蓝的深灰底 + 略暗的白字。
+   ============================================================ */
+
+[data-theme="dark"] {
+  color-scheme: dark;          /* 让原生滚动条、checkbox、右键菜单也变深 */
+  --bg: #14161a;
+  --panel: #1c1f25;
+  --line: #2b2f37;
+  --line-soft: #23262c;
+  --text: #e2e5ea;
+  --text-2: #a6acb6;
+  --muted: #767d88;
+  --accent: #5aa2ff;
+  --accent-hover: #7bb5ff;
+  --accent-weak: #16283d;
+  --accent-line: #2b4463;
+  --green: #6cc48d;
+  --green-bg: #17281d;
+  --green-line: #24452f;
+  --danger: #e26055;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-md: 0 10px 30px -14px rgba(0, 0, 0, .75);
+}
+
+/* ---- 登录页 ---- */
+
+[data-theme="dark"] .login {
+  background: radial-gradient(1100px 560px at 50% -12%, #1c2532 0%, #14161a 55%, #14161a 100%);
+}
+
+[data-theme="dark"] .login-card {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: 0 22px 60px -26px rgba(0, 0, 0, .85), 0 2px 6px rgba(0, 0, 0, .3);
+}
+
+/* ---- 输入框（登录 / 搜索 / 编辑弹层 / 槽位） ---- */
+
+[data-theme="dark"] .login-input,
+[data-theme="dark"] .search input,
+[data-theme="dark"] .field input,
+[data-theme="dark"] .slot-edit input {
+  background: #171a1f;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+[data-theme="dark"] .login-input:focus,
+[data-theme="dark"] .search input:focus,
+[data-theme="dark"] .field input:focus,
+[data-theme="dark"] .slot-edit input:focus {
+  background: #171a1f;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(90, 162, 255, .18);
+}
+
+[data-theme="dark"] .login-input::placeholder,
+[data-theme="dark"] .search input::placeholder,
+[data-theme="dark"] .slot-edit input::placeholder,
+[data-theme="dark"] .field input::placeholder {
+  color: #5d646e;
+}
+
+[data-theme="dark"] .login-hint.warn { color: #d9a441; }
+
+/* ---- 工具栏 ---- */
+
+[data-theme="dark"] .tool:hover { background: #262a32; color: var(--text); }
+[data-theme="dark"] .tool:active { background: #2f343d; }
+
+/* ---- 列表 ---- */
+
+[data-theme="dark"] .item:hover { background: #21252c; }
+[data-theme="dark"] .item.imported:hover { background: #1b2f22; }
+
+[data-theme="dark"] .avatar {
+  background: #2a2f38;
+  color: #9aa2ae;
+}
+
+[data-theme="dark"] .item.active .avatar {
+  background: #1b2f45;
+  color: var(--accent);
+}
+
+[data-theme="dark"] .item.imported .avatar {
+  background: #1b3526;
+  color: var(--green);
+}
+
+[data-theme="dark"] .ph-icon {
+  background: #262a32;
+  color: #6b727d;
+}
+
+/* ---- 按钮 ---- */
+
+[data-theme="dark"] .btn.ghost,
+[data-theme="dark"] .btn.danger-ghost,
+[data-theme="dark"] .mini {
+  background: #22262d;
+  border-color: #343a44;
+  color: var(--text-2);
+}
+
+[data-theme="dark"] .btn.ghost:hover {
+  background: #2a2f38;
+  border-color: #414852;
+}
+
+[data-theme="dark"] .btn.danger-ghost:hover {
+  background: #2e1e1d;
+  border-color: #5c322e;
+}
+
+[data-theme="dark"] .mini:hover { background: #2a2f38; border-color: #414852; }
+[data-theme="dark"] .mini:active { background: #313742; }
+[data-theme="dark"] .icon-btn:hover { background: #262a32; color: var(--text); }
+
+[data-theme="dark"] .btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #14090a;
+}
+
+[data-theme="dark"] .btn.danger:hover {
+  background: #c94f45;
+  border-color: #c94f45;
+}
+
+/* 主按钮是亮蓝底，白字在深色下反而不够清楚，改用近黑的字 */
+[data-theme="dark"] .login-btn,
+[data-theme="dark"] .btn.primary,
+[data-theme="dark"] #btn-new {
+  color: #0e1116;
+}
+
+/* ---- 详情与槽位 ---- */
+
+[data-theme="dark"] .slot.empty-slot { background: #191c21; }
+[data-theme="dark"] .slot-tag { background: #262a32; color: var(--text-2); }
+[data-theme="dark"] .slot-edit { background: #191c21; }
+[data-theme="dark"] .slot-edit .clear:hover { background: #2f343d; }
+
+/* ---- 弹层 ---- */
+
+[data-theme="dark"] .overlay { background: rgba(0, 0, 0, .6); }
+
+[data-theme="dark"] .modal {
+  background: var(--panel);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .8);
+}
+
+/* ---- 提示条 ----
+   深色底下 toast 不能再是深色，否则和背景糊在一起，加亮一档 */
+
+[data-theme="dark"] .toast {
+  background: #3a404a;
+  color: #e2e5ea;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .8);
+}
+
+[data-theme="dark"] .toast.ok { background: #1f5c3d; }
+[data-theme="dark"] .toast.err { background: #8c3a32; }
+[data-theme="dark"] .toast.warn { background: #7a5a1e; }
+
+/* ---- 导入预览 ---- */
+
+[data-theme="dark"] .imp-tree { background: #191c21; }
+[data-theme="dark"] .imp-proj-head { background: #22262d; }
+[data-theme="dark"] .imp-badge { background: var(--accent-weak); color: #7bb5ff; }
+[data-theme="dark"] .imp-badge.warn { background: #33260f; color: #d9a441; }
+
+/* 滚动条有自定义样式，color-scheme: dark 盖不住，得单独给深色值 */
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #3a404a;
+  background-clip: content-box;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #4d5462;
+  background-clip: content-box;
 }

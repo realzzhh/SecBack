@@ -547,12 +547,17 @@ fn install_menu(app: &AppHandle, unlocked: bool) {
                 .build(app)?,
         );
 
+        let view = SubmenuBuilder::new(app, "外观")
+            .item(&MenuItemBuilder::with_id("theme-dark", "深色").build(app)?)
+            .item(&MenuItemBuilder::with_id("theme-light", "浅色").build(app)?)
+            .build()?;
+
         let help = SubmenuBuilder::new(app, "帮助")
             .item(&MenuItemBuilder::with_id("about", "关于 SecBack").build(app)?)
             .build()?;
 
         let menu = MenuBuilder::new(app)
-            .items(&[&file.build()?, &help])
+            .items(&[&file.build()?, &view, &help])
             .build()?;
 
         app.set_menu(menu)?;
@@ -564,8 +569,18 @@ fn install_menu(app: &AppHandle, unlocked: bool) {
     }
 }
 
-fn pick_and_import(app: AppHandle) {
-    app.dialog()
+/// 窗口标题栏跟界面保持一致。深色界面顶个白标题栏太割裂。
+fn set_window_theme(app: &AppHandle, dark: bool) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_theme(Some(if dark {
+            tauri::Theme::Dark
+        } else {
+            tauri::Theme::Light
+        }));
+    }
+}
+
+fn pick_and_import(app: AppHandle) {    app.dialog()
         .file()
         .add_filter("SecBack 密库", &["properties", "property"])
         .pick_file(move |picked| {
@@ -800,6 +815,11 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
             }
         }
 
+        // 前端恢复上次选的外观时告诉宿主，好把标题栏一起调过来
+        "theme_sync" => {
+            set_window_theme(app, msg["dark"].as_bool().unwrap_or(true));
+        }
+
         "about" => {
             toast(
                 app,
@@ -878,6 +898,14 @@ fn main() {
                 "delete" => push(app, json!({ "t": "cmd", "name": "delete" })),
                 "import" => pick_and_import(app.clone()),
                 "changePwd" => push(app, json!({ "t": "cmd", "name": "changePwd" })),
+                "theme-dark" => {
+                    set_window_theme(app, true);
+                    push(app, json!({ "t": "cmd", "name": "theme-dark" }));
+                }
+                "theme-light" => {
+                    set_window_theme(app, false);
+                    push(app, json!({ "t": "cmd", "name": "theme-light" }));
+                }
                 "lock" => do_lock(app, st.inner()),
                 "about" => push(app, json!({ "t": "cmd", "name": "about" })),
                 "quit" => app.exit(0),

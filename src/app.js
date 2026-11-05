@@ -48,6 +48,24 @@ const editReveals = new Set();
 
 const $ = id => document.getElementById(id);
 
+// ------------------------------------------------------------------ 主题
+//
+// 默认深色。用户在菜单里选过就以 localStorage 为准。
+// HTML 标签上已经写死 data-theme="dark"，所以首帧就是深的，不会先闪一下白。
+
+function applyTheme(name, persist = true) {
+  document.documentElement.dataset.theme = name === "light" ? "light" : "dark";
+  if (persist) {
+    try { localStorage.setItem("secback.theme", name); } catch (_) {}
+  }
+  // 让宿主把窗口标题栏也调成一致，否则深色界面顶个白标题栏很割裂
+  send({ t: "theme_sync", dark: name !== "light" });
+}
+
+function currentTheme() {
+  try { return localStorage.getItem("secback.theme") || "dark"; } catch (_) { return "dark"; }
+}
+
 // ------------------------------------------------------------------ 登录视图
 
 function setHint(text, kind) {
@@ -403,11 +421,16 @@ onHost(raw => {
       if (m.name === "delete") askDelete();
       if (m.name === "about") send({ t: "about" });
       if (m.name === "changePwd") openChangePwd();
+      if (m.name === "theme-dark") applyTheme("dark");
+      if (m.name === "theme-light") applyTheme("light");
       return;
     }
 
 }).then(() => {
-  // 监听器就绪之后才打招呼，别让宿主的第一条消息白白丢掉
+  // 恢复上次选的外观，并让宿主同步窗口标题栏颜色。
+  // 必须在监听器就绪之后：applyTheme 里会发消息。
+  applyTheme(currentTheme(), false);
+  // 然后才打招呼，别让宿主的第一条消息白白丢掉
   send({ t: "ready" });
 });
 
