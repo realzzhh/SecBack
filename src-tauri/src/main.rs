@@ -540,6 +540,7 @@ fn install_menu(app: &AppHandle, unlocked: bool) {
                 .item(&MenuItemBuilder::with_id("import", "从另一台机器导入…").build(app)?)
                 .separator()
                 .item(&MenuItemBuilder::with_id("changePwd", "修改主密码…").build(app)?)
+                .item(&MenuItemBuilder::with_id("setRecovery", "设置恢复码…").build(app)?)
                 .separator()
                 .item(
                     &MenuItemBuilder::with_id("lock", "锁定")
@@ -861,6 +862,58 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
             }
         }
 
+        // 设恢复码：验证当前口令 → 生成一组新码（首次会顺带把库升到 v2）
+        "set_recovery" => {
+            let pwd = msg["pwd"].as_str().unwrap_or("").to_string();
+            let mut store = lock!(st.store);
+            match store.enable_recovery(&st.path, &pwd) {
+                Ok(code) => {
+                    refresh(app, st, &store);
+                    push(app, json!({ "t": "recoveryCode", "code": code }));
+                }
+                Err(e) => push(app, json!({ "t": "recoveryError", "text": e.text() })),
+            }
+        }
+
+        // 用恢复码解锁。成功后先不让人进去，必须设好新密码才放行——
+        // 否则他改了数据一保存，库里存的还是那把忘掉的口令。
+        "recover" => {
+            let code = msg["code"].as_str().unwrap_or("").to_string();
+            let mut store = lock!(st.store);
+            match store.recover(&st.path, &code) {
+                Ok(()) => {
+                    let n = store.projects().len();
+                    push(app, json!({ "t": "recoverOk", "items": n }));
+                }
+                Err(e) => push(app, json!({ "t": "recoverError", "text": e.text() })),
+            }
+        }
+
+        "recover_set_password" => {
+            let new = msg["new"].as_str().unwrap_or("").to_string();
+            let mut store = lock!(st.store);
+            match store.set_password(&st.path, &new) {
+                Ok(()) => {
+                    *lock!(st.using_default_pwd) = new == "1021";
+                    *lock!(st.selected) = store
+                        .projects()
+                        .first()
+                        .map(|p| hex(&p.id))
+                        .unwrap_or_default();
+                    refresh(app, st, &store);
+                    install_menu(app, true);
+                    push(app, json!({ "t": "loggedIn" }));
+                    toast(app, "ok", "新主密码已生效。恢复码仍然可用。");
+                }
+                Err(e) => push(app, json!({ "t": "recoverError", "text": e.text() })),
+            }
+        }
+
+        // 恢复途中取消：把解出来的东西重新抹掉
+        "recover_cancel" => {
+            do_lock(app, st);
+        }
+
         // 前端恢复上次选的外观时告诉宿主。这里只更新宿主状态、不回消息——
         // 前端那边已经应用过了，回一条 cmd 会和它再回报一次，绕成死循环。
         "theme_sync" => {
@@ -947,6 +1000,7 @@ fn main() {
                 "delete" => push(app, json!({ "t": "cmd", "name": "delete" })),
                 "import" => pick_and_import(app.clone()),
                 "changePwd" => push(app, json!({ "t": "cmd", "name": "changePwd" })),
+                "setRecovery" => push(app, json!({ "t": "cmd", "name": "setRecovery" })),
                 "theme-dark" => {
                     apply_theme(app, st.inner(), true);
                     push(app, json!({ "t": "cmd", "name": "theme-dark" }));

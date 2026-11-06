@@ -7,7 +7,11 @@
 //!      不会把已经存好的数据写坏。
 
 use crate::crypto::{self, KEY_LEN, NONCE_LEN, SALT_LEN, TAG_LEN};
-use crate::format::{self, Header, Project, FORMAT_VERSION, HEADER_SIZE};
+use crate::restore;
+use crate::format::{
+    self, Header, Project, DEK_LEN, FLAG_RECOVERY, FORMAT_VERSION, FORMAT_VERSION_V2, HEADER_SIZE,
+    WRAPPED_DEK_LEN,
+};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -21,6 +25,10 @@ pub enum Err {
     CryptoFail,
     TooWeak,
     Locked,
+    /// 这个库没设恢复码
+    NoRecovery,
+    /// 恢复码不对
+    BadRestoreCode,
 }
 
 impl Err {
@@ -34,6 +42,8 @@ impl Err {
             Err::CryptoFail => "加密运算失败",
             Err::TooWeak => "密码不能为空",
             Err::Locked => "密库未解锁",
+            Err::NoRecovery => "这个密库没有设置恢复码",
+            Err::BadRestoreCode => "恢复码不正确",
         }
     }
 }
@@ -70,9 +80,12 @@ pub struct ProbeInfo {
 
 pub struct Store {
     projects: Vec<Project>,
+    /// 加密载荷用的密钥。
+    /// v1：直接是 PBKDF2(口令) 的结果；v2：是那个被口令和恢复码包起来的随机 DEK。
     key: [u8; KEY_LEN],
-    salt: [u8; SALT_LEN],
-    iterations: u32,
+    /// 写盘用的头模板。salt / iterations / version / 两处 wrap 材料都在里面，
+    /// 每次 save 只更新 nonce 和 payload_size——这样保存时不需要口令。
+    hdr: Header,
     unlocked: bool,
 }
 
@@ -81,8 +94,11 @@ impl Store {
         Self {
             projects: Vec::new(),
             key: [0u8; KEY_LEN],
-            salt: [0u8; SALT_LEN],
-            iterations: crypto::ITERATIONS,
+            hdr: Header {
+                version: FORMAT_VERSION,
+                iterations: crypto::ITERATIONS,
+                ..Default::default()
+            },
             unlocked: false,
         }
     }
@@ -112,7 +128,7 @@ impl Store {
         }
         self.projects.clear();
         crypto::wipe(&mut self.key);
-        crypto::wipe(&mut self.salt);
+        crypto::wipe(&mut self.hdr.salt);
         self.unlocked = false;
     }
 
@@ -135,9 +151,15 @@ impl Store {
         }
 
         let salt = crypto::random_fixed::<SALT_LEN>().ok_or(Err::CryptoFail)?;
-        self.salt = salt;
-        self.iterations = crypto::ITERATIONS;
-        self.key = crypto::derive_key(password, &salt, self.iterations);
+        // 新建的库是 v1：不带恢复槽，C++ 版也能读。
+        // 用户主动去设恢复码时才升 v2。
+        self.hdr = Header {
+            version: FORMAT_VERSION,
+            iterations: crypto::ITERATIONS,
+            salt,
+            ..Default::default()
+        };
+        self.key = crypto::derive_key(password, &salt, self.hdr.iterations);
         self.projects.clear();
         self.unlocked = true;
 
@@ -160,24 +182,43 @@ impl Store {
             return Err(Err::Corrupt);
         }
 
-        let h = Header::parse(&bytes[..HEADER_SIZE]).map_err(|_| Err::Corrupt)?;
+        // parse 自己会按版本判断头有多长（v1=64 / v2=256）
+        let h = Header::parse(&bytes).map_err(|_| Err::Corrupt)?;
+        let hsize = h.size();
 
-        // payload_size 含 16 字节 tag；文件总长必须正好是 64 + payload_size
-        let expect = HEADER_SIZE as u64 + h.payload_size;
+        if bytes.len() < hsize {
+            return Err(Err::Corrupt);
+        }
+
+        // payload_size 含 16 字节 tag；文件总长必须正好是 头长 + payload_size
+        let expect = hsize as u64 + h.payload_size;
         if h.payload_size < TAG_LEN as u64 || expect != bytes.len() as u64 {
             return Err(Err::Corrupt);
         }
 
-        let key = crypto::derive_key(password, &h.salt, h.iterations);
-        let plain = crypto::open(&key, &h.nonce, &bytes[HEADER_SIZE..])
+        let key = if h.version >= FORMAT_VERSION_V2 {
+            // v2：口令只负责解开 DEK，真正的载荷密钥是那个随机 DEK
+            let kek = crypto::derive_key(password, &h.salt, h.iterations);
+            let dek = crypto::open(&kek, &h.wrap_nonce, &h.wrapped_dek)
+                .map_err(|_| Err::BadPassword)?;
+            if dek.len() != DEK_LEN {
+                return Err(Err::Corrupt);
+            }
+            let mut k = [0u8; KEY_LEN];
+            k.copy_from_slice(&dek);
+            k
+        } else {
+            crypto::derive_key(password, &h.salt, h.iterations)
+        };
+
+        let plain = crypto::open(&key, &h.nonce, &bytes[hsize..])
             .map_err(|_| Err::BadPassword)?;
 
         let projects = format::deserialize(&plain).map_err(|_| Err::Corrupt)?;
 
         // 走到这里才算真的解开了：前面任何一步失败都不改现有状态。
         self.key = key;
-        self.salt = h.salt;
-        self.iterations = h.iterations;
+        self.hdr = h;
         self.projects = projects;
         self.unlocked = true;
         Ok(())
@@ -188,20 +229,16 @@ impl Store {
             return Err(Err::Locked);
         }
         let plain = format::serialize(&self.projects);
-
         let nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
         let blob = crypto::seal(&self.key, &nonce, &plain).map_err(|_| Err::CryptoFail)?;
 
-        let header = Header {
-            version: FORMAT_VERSION,
-            iterations: self.iterations,
-            salt: self.salt,
-            nonce,
-            payload_size: blob.len() as u64,
-        };
+        // 头模板原样带过去（v2 的两处 wrap 材料必须保留），只换 nonce 和长度
+        self.hdr.nonce = nonce;
+        self.hdr.payload_size = blob.len() as u64;
 
-        let mut out = Vec::with_capacity(HEADER_SIZE + blob.len());
-        out.extend_from_slice(&header.encode());
+        let head = self.hdr.encode();
+        let mut out = Vec::with_capacity(head.len() + blob.len());
+        out.extend_from_slice(&head);
         out.extend_from_slice(&blob);
 
         write_atomic(path, &out)
@@ -218,15 +255,12 @@ impl Store {
         let nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
         let blob = crypto::seal(&self.key, &nonce, &plain).map_err(|_| Err::CryptoFail)?;
 
-        let header = Header {
-            version: FORMAT_VERSION,
-            iterations: self.iterations,
-            salt: self.salt,
-            nonce,
-            payload_size: blob.len() as u64,
-        };
-        let mut out = Vec::with_capacity(HEADER_SIZE + blob.len());
-        out.extend_from_slice(&header.encode());
+        self.hdr.nonce = nonce;
+        self.hdr.payload_size = blob.len() as u64;
+
+        let head = self.hdr.encode();
+        let mut out = Vec::with_capacity(head.len() + blob.len());
+        out.extend_from_slice(&head);
         out.extend_from_slice(&blob);
 
         write_atomic(path, &out)
@@ -243,13 +277,159 @@ impl Store {
         probe.load(path, old_pwd)?;
 
         let new_salt = crypto::random_fixed::<SALT_LEN>().ok_or(Err::CryptoFail)?;
-        let new_key = crypto::derive_key(new_pwd, &new_salt, self.iterations);
 
-        self.salt = new_salt;
-        self.key = new_key;
+        if probe.hdr.version >= FORMAT_VERSION_V2 {
+            // v2：DEK 不动，只用新口令把它重新包一遍。整个库不用重加密。
+            let dek = probe.key;
+            let kek = crypto::derive_key(new_pwd, &new_salt, probe.hdr.iterations);
+            let wrap_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
+            let wrapped = crypto::seal(&kek, &wrap_nonce, &dek).map_err(|_| Err::CryptoFail)?;
+            if wrapped.len() != WRAPPED_DEK_LEN {
+                return Err(Err::CryptoFail);
+            }
+
+            self.hdr = probe.hdr.clone();
+            self.hdr.salt = new_salt;
+            self.hdr.wrap_nonce = wrap_nonce;
+            self.hdr.wrapped_dek.copy_from_slice(&wrapped);
+            self.key = dek;
+        } else {
+            // v1：密钥本身就是口令派生的，只能整库重新加密
+            self.hdr = Header {
+                version: FORMAT_VERSION,
+                iterations: probe.hdr.iterations,
+                salt: new_salt,
+                ..Default::default()
+            };
+            self.key = crypto::derive_key(new_pwd, &new_salt, probe.hdr.iterations);
+        }
+
         // 用磁盘上读到的内容写，而不是内存里的——避免"内存有未保存改动"时被静默覆盖
         self.projects = std::mem::take(&mut probe.projects);
         self.unlocked = true;
+        self.save(path)
+    }
+
+    /// 这个库有没有设恢复码。
+    pub fn has_recovery(&self) -> bool {
+        self.hdr.has_recovery()
+    }
+
+    /// 当前库的格式版本，界面用来提示"这份还不是 v2"。
+    pub fn version(&self) -> u16 {
+        self.hdr.version
+    }
+
+    /// 设恢复码。没有就升级到 v2 并生成一组新码，已有就换一组新的。
+    /// 返回给人抄写的那串（带短横）。
+    ///
+    /// 先按磁盘现状验一遍口令，顺便拿到真实的 DEK 和头，
+    /// 免得界面状态和磁盘不一致时改坏文件。
+    pub fn enable_recovery(&mut self, path: &Path, password: &str) -> Result<String, Err> {
+        let mut probe = Store::new();
+        probe.load(path, password)?;
+
+        // v1 的 key 是口令派生出来的，当不了独立 DEK——升级时得换一个随机的
+        let dek = if probe.hdr.version < FORMAT_VERSION_V2 {
+            crypto::random_fixed::<DEK_LEN>().ok_or(Err::CryptoFail)?
+        } else {
+            probe.key
+        };
+
+        let kek = crypto::derive_key(password, &probe.hdr.salt, probe.hdr.iterations);
+        let wrap_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
+        let wrapped = crypto::seal(&kek, &wrap_nonce, &dek).map_err(|_| Err::CryptoFail)?;
+        if wrapped.len() != WRAPPED_DEK_LEN {
+            return Err(Err::CryptoFail);
+        }
+
+        let (_, code) = restore::generate().ok_or(Err::CryptoFail)?;
+        let rec_salt = crypto::random_fixed::<SALT_LEN>().ok_or(Err::CryptoFail)?;
+        let rec_kek = crypto::derive_key(&code, &rec_salt, probe.hdr.iterations);
+        let rec_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
+        let rec_wrapped = crypto::seal(&rec_kek, &rec_nonce, &dek).map_err(|_| Err::CryptoFail)?;
+        if rec_wrapped.len() != WRAPPED_DEK_LEN {
+            return Err(Err::CryptoFail);
+        }
+
+        self.hdr = probe.hdr.clone();
+        self.hdr.version = FORMAT_VERSION_V2;
+        self.hdr.flags |= FLAG_RECOVERY;
+        self.hdr.wrap_nonce = wrap_nonce;
+        self.hdr.wrapped_dek.copy_from_slice(&wrapped);
+        self.hdr.recovery_salt = rec_salt;
+        self.hdr.recovery_nonce = rec_nonce;
+        self.hdr.recovery_wrapped_dek.copy_from_slice(&rec_wrapped);
+        self.key = dek;
+        self.projects = std::mem::take(&mut probe.projects);
+        self.unlocked = true;
+
+        self.save(path)?;
+        Ok(restore::pretty(&code))
+    }
+
+    /// 用恢复码解锁。
+    ///
+    /// 成功之后库是「已解锁但还没设新口令」的状态——紧接着必须调
+    /// [`set_password`](Self::set_password)，否则下次还得再用恢复码。
+    pub fn recover(&mut self, path: &Path, code: &str) -> Result<(), Err> {
+        let bytes = fs::read(path).map_err(|_| Err::Io)?;
+        let h = Header::parse(&bytes).map_err(|_| Err::Corrupt)?;
+
+        // 先看这个库有没有恢复槽，再看码的格式——
+        // 反过来的话，"库压根没设恢复码"会被报成"恢复码不对"，容易误导。
+        if !h.has_recovery() {
+            return Err(Err::NoRecovery);
+        }
+
+        let norm = restore::normalize(code).ok_or(Err::BadRestoreCode)?;
+        let hsize = h.size();
+        if bytes.len() != hsize + h.payload_size as usize {
+            return Err(Err::Corrupt);
+        }
+
+        let kek = crypto::derive_key(&norm, &h.recovery_salt, h.iterations);
+        let dek = crypto::open(&kek, &h.recovery_nonce, &h.recovery_wrapped_dek)
+            .map_err(|_| Err::BadRestoreCode)?;
+        if dek.len() != DEK_LEN {
+            return Err(Err::Corrupt);
+        }
+        let mut key = [0u8; KEY_LEN];
+        key.copy_from_slice(&dek);
+
+        let plain = crypto::open(&key, &h.nonce, &bytes[hsize..]).map_err(|_| Err::Corrupt)?;
+        let projects = format::deserialize(&plain).map_err(|_| Err::Corrupt)?;
+
+        self.key = key;
+        self.hdr = h;
+        self.projects = projects;
+        self.unlocked = true;
+        Ok(())
+    }
+
+    /// 恢复之后设新口令：只重新包 DEK，不重加密内容。
+    pub fn set_password(&mut self, path: &Path, new_pwd: &str) -> Result<(), Err> {
+        if !self.unlocked {
+            return Err(Err::Locked);
+        }
+        if new_pwd.is_empty() {
+            return Err(Err::TooWeak);
+        }
+        if self.hdr.version < FORMAT_VERSION_V2 {
+            return Err(Err::Corrupt);
+        }
+
+        let new_salt = crypto::random_fixed::<SALT_LEN>().ok_or(Err::CryptoFail)?;
+        let kek = crypto::derive_key(new_pwd, &new_salt, self.hdr.iterations);
+        let wrap_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
+        let wrapped = crypto::seal(&kek, &wrap_nonce, &self.key).map_err(|_| Err::CryptoFail)?;
+        if wrapped.len() != WRAPPED_DEK_LEN {
+            return Err(Err::CryptoFail);
+        }
+
+        self.hdr.salt = new_salt;
+        self.hdr.wrap_nonce = wrap_nonce;
+        self.hdr.wrapped_dek.copy_from_slice(&wrapped);
         self.save(path)
     }
 
@@ -340,11 +520,11 @@ pub fn probe_file(path: &Path) -> ProbeInfo {
     let ver = u16::from_le_bytes([bytes[8], bytes[9]]);
     info.version = ver;
 
-    match Header::parse(&bytes[..HEADER_SIZE]) {
+    match Header::parse(&bytes) {
         Ok(h) => {
             info.iterations = h.iterations;
             info.payload_size = h.payload_size;
-            let expect = HEADER_SIZE as u64 + h.payload_size;
+            let expect = h.size() as u64 + h.payload_size;
             if h.payload_size < TAG_LEN as u64 || expect != bytes.len() as u64 {
                 info.status = ProbeStatus::Corrupt;
             } else {
@@ -352,9 +532,8 @@ pub fn probe_file(path: &Path) -> ProbeInfo {
             }
         }
         Err(format::ParseError::Version(v)) => {
-            info.status = if v > FORMAT_VERSION {
-                ProbeStatus::VersionNewer(v)
-            } else {
+            info.status = if v > FORMAT_VERSION_V2 {
+                ProbeStatus::VersionNewer(v)            } else {
                 ProbeStatus::VersionOlder(v)
             };
         }
@@ -592,6 +771,222 @@ mod tests {
             s.load_or_create(&path, "", true).unwrap_err(),
             Err::TooWeak
         );
+        let _ = fs::remove_file(&path);
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn tmp_path(name: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "secback_rec_{}_{}.properties",
+            name,
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&p);
+        p
+    }
+
+    fn sample(name: &str, user: &str, pass: &str) -> Project {
+        let mut p = Project::new_with_id([7u8; 16]);
+        p.name = name.to_string();
+        p.slots[0] = crate::format::Account {
+            user: user.to_string(),
+            pass: pass.to_string(),
+            remark: String::new(),
+        };
+        p
+    }
+
+    fn fresh(path: &Path, pwd: &str, name: &str, user: &str, pass: &str) -> Store {
+        let mut s = Store::new();
+        s.load_or_create(path, pwd, true).unwrap();
+        s.projects_mut().push(sample(name, user, pass));
+        s.save(path).unwrap();
+        s
+    }
+
+    #[test]
+    fn enable_recovery_upgrades_to_v2_and_password_still_works() {
+        let path = tmp_path("upgrade");
+        let mut s = fresh(&path, "pwd-a", "邮箱", "u1", "p1");
+        assert_eq!(s.version(), 1, "新建的库应该是 v1");
+
+        let code = s.enable_recovery(&path, "pwd-a").unwrap();
+        assert_eq!(code.len(), 39, "32 字符 + 7 个短横");
+        assert_eq!(s.version(), 2);
+
+        // 密码照旧能开
+        let mut s2 = Store::new();
+        s2.load(&path, "pwd-a").unwrap();
+        assert_eq!(s2.projects()[0].slots[0].pass, "p1");
+        assert!(s2.has_recovery());
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_with_code_opens_vault() {
+        let path = tmp_path("recover");
+        let mut s = fresh(&path, "forgotten", "银行", "u", "secret");
+        let code = s.enable_recovery(&path, "forgotten").unwrap();
+        s.clear_secure();
+
+        // 假设密码彻底忘了，只有恢复码
+        let mut s2 = Store::new();
+        assert_eq!(s2.load(&path, "wrong-pwd"), Err(Err::BadPassword));
+
+        s2.recover(&path, &code).unwrap();
+        assert_eq!(s2.projects().len(), 1);
+        assert_eq!(s2.projects()[0].name, "银行");
+        assert_eq!(s2.projects()[0].slots[0].pass, "secret");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_accepts_messy_code() {
+        let path = tmp_path("messy");
+        let mut s = fresh(&path, "pw", "A", "u", "p");
+        let code = s.enable_recovery(&path, "pw").unwrap();
+        s.clear_secure();
+
+        // 用户抄的时候可能大小写混、多打空格
+        let messy = format!("  {}  ", code.to_lowercase().replace('-', " "));
+        let mut s2 = Store::new();
+        s2.recover(&path, &messy).unwrap();
+        assert_eq!(s2.projects().len(), 1);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recover_then_set_new_password() {
+        let path = tmp_path("newpwd");
+        let mut s = fresh(&path, "old-pwd", "A", "u", "p");
+        let code = s.enable_recovery(&path, "old-pwd").unwrap();
+        s.clear_secure();
+
+        let mut s2 = Store::new();
+        s2.recover(&path, &code).unwrap();
+        s2.set_password(&path, "brand-new-pwd").unwrap();
+        s2.clear_secure();
+
+        // 新密码能开
+        let mut s3 = Store::new();
+        s3.load(&path, "brand-new-pwd").unwrap();
+        assert_eq!(s3.projects()[0].slots[0].pass, "p");
+
+        // 旧密码不能
+        let mut s4 = Store::new();
+        assert_eq!(s4.load(&path, "old-pwd"), Err(Err::BadPassword));
+
+        // 恢复码仍然有效（还是包着同一个 DEK）
+        let mut s5 = Store::new();
+        s5.recover(&path, &code).unwrap();
+        assert_eq!(s5.projects().len(), 1);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn wrong_restore_code_rejected() {
+        let path = tmp_path("badcode");
+        let mut s = fresh(&path, "pw", "A", "u", "p");
+        let code = s.enable_recovery(&path, "pw").unwrap();
+        s.clear_secure();
+
+        // 改掉最后一个字符
+        let mut bad: Vec<char> = code.chars().collect();
+        let last = bad.len() - 1;
+        bad[last] = if bad[last] == 'A' { 'B' } else { 'A' };
+        let bad: String = bad.into_iter().collect();
+
+        let mut s2 = Store::new();
+        assert_eq!(s2.recover(&path, &bad), Err(Err::BadRestoreCode));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn malformed_restore_code_rejected() {
+        let path = tmp_path("malformed");
+        let mut s = fresh(&path, "pw", "A", "u", "p");
+        let _ = s.enable_recovery(&path, "pw").unwrap();
+        s.clear_secure();
+
+        let mut s2 = Store::new();
+        assert_eq!(s2.recover(&path, "太短了"), Err(Err::BadRestoreCode));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn vault_without_recovery_slot() {
+        let path = tmp_path("noslot");
+        fresh(&path, "pw", "A", "u", "p");
+
+        // v1 库没有恢复槽，随便给个格式合法的码也应报"没设恢复码"
+        let mut s = Store::new();
+        let code = "0123456789ABCDEFGHJKMNPQRSTVWXY";
+        assert_eq!(s.recover(&path, code), Err(Err::NoRecovery));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn v2_rekey_keeps_content_and_recovery() {
+        let path = tmp_path("v2rekey");
+        let mut s = fresh(&path, "pwd-1", "A", "u", "p1");
+        let code = s.enable_recovery(&path, "pwd-1").unwrap();
+        s.clear_secure();
+
+        let mut s2 = Store::new();
+        s2.rekey(&path, "pwd-1", "pwd-2").unwrap();
+        assert_eq!(s2.version(), 2, "改密码不该把库退回 v1");
+
+        let mut s3 = Store::new();
+        s3.load(&path, "pwd-2").unwrap();
+        assert_eq!(s3.projects()[0].slots[0].pass, "p1");
+
+        // 改密码后恢复码依然有效
+        let mut s4 = Store::new();
+        s4.recover(&path, &code).unwrap();
+        assert_eq!(s4.projects().len(), 1);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recovery_code_can_be_reissued() {
+        let path = tmp_path("reissue");
+        let mut s = fresh(&path, "pw", "A", "u", "p");
+        let first = s.enable_recovery(&path, "pw").unwrap();
+        let second = s.enable_recovery(&path, "pw").unwrap();
+        assert_ne!(first, second, "重新生成应该换一组新码");
+        s.clear_secure();
+
+        // 旧码作废
+        let mut s2 = Store::new();
+        assert_eq!(s2.recover(&path, &first), Err(Err::BadRestoreCode));
+
+        // 新码可用
+        let mut s3 = Store::new();
+        s3.recover(&path, &second).unwrap();
+        assert_eq!(s3.projects().len(), 1);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn enable_recovery_rejects_wrong_password() {
+        let path = tmp_path("badpwd");
+        let mut s = fresh(&path, "real", "A", "u", "p");
+        assert_eq!(s.enable_recovery(&path, "fake"), Err(Err::BadPassword));
         let _ = fs::remove_file(&path);
     }
 }

@@ -366,6 +366,16 @@ onHost(raw => {
       $("imp").hidden = true;
       $("ipwd").hidden = true;
       $("pwd").hidden = true;
+      $("recpwd").hidden = true;
+      $("reccode").hidden = true;
+      $("recover").hidden = true;
+      $("recnew").hidden = true;
+      $("recpwd-input").value = "";
+      $("recover-input").value = "";
+      $("rec-confirm").value = "";
+      $("recnew-1").value = "";
+      $("recnew-2").value = "";
+      recCodeText = "";
       $("m-slots").innerHTML = "";
       $("m-name").value = "";
       $("m-remark").value = "";
@@ -416,6 +426,28 @@ onHost(raw => {
       return;
     }
 
+    if (m.t === "recoveryCode") {
+      showRecoveryCode(m.code);
+      return;
+    }
+
+    if (m.t === "recoverOk") {
+      // 解开了，但还没设新密码——必须先设好才能进，否则改了数据一保存，
+      // 库里存的仍是那把已经忘掉的口令。
+      $("recover").hidden = true;
+      $("recnew").hidden = false;
+      $("recnew-1").value = "";
+      $("recnew-2").value = "";
+      $("recnew-err").textContent = "";
+      setTimeout(() => $("recnew-1").focus(), 30);
+      return;
+    }
+
+    if (m.t === "recoveryError" || m.t === "recoverError") {
+      showRecError(m.text || "操作失败");
+      return;
+    }
+
     if (m.t === "cmd") {
       if (m.name === "new") openEditor(null);
       if (m.name === "delete") askDelete();
@@ -423,6 +455,7 @@ onHost(raw => {
       if (m.name === "changePwd") openChangePwd();
       if (m.name === "theme-dark") applyTheme("dark");
       if (m.name === "theme-light") applyTheme("light");
+      if (m.name === "setRecovery") openSetRecovery();
       return;
     }
 
@@ -537,6 +570,10 @@ document.addEventListener("keydown", e => {
   if ($("imp").hidden === false) return;
   if ($("ipwd").hidden === false) return;
   if ($("pwd").hidden === false) return;
+  if ($("recpwd").hidden === false) return;
+  if ($("reccode").hidden === false) return;
+  if ($("recover").hidden === false) return;
+  if ($("recnew").hidden === false) return;
 
   if (e.ctrlKey && e.key.toLowerCase() === "n") {
     e.preventDefault();
@@ -696,6 +733,10 @@ document.addEventListener("keydown", e => {
     return;
   }
   if ($("pwd").hidden === false) { $("pwd").hidden = true; return; }
+  if ($("recpwd").hidden === false) { $("recpwd").hidden = true; return; }
+  if ($("reccode").hidden === false) { $("reccode-cancel").click(); return; }
+  if ($("recover").hidden === false) { $("recover").hidden = true; return; }
+  if ($("recnew").hidden === false) { $("recnew-cancel").click(); return; }
   if ($("confirm").hidden === false) $("confirm").hidden = true;
 });
 
@@ -888,4 +929,117 @@ $("pwd-cancel").addEventListener("click", () => {
   $("pwd-old").value = "";
   $("pwd-new").value = "";
   $("pwd-new2").value = "";
+});
+
+// ---------------------------------------------------------------- 恢复码
+//
+// 恢复码是主密码之外的第二把钥匙：它能解出同一个数据密钥。
+// 所以它的保管要求和密码一样严——抄在纸上、和电脑分开。
+
+let recCodeText = "";
+
+function openSetRecovery() {
+  $("recpwd-input").value = "";
+  $("recpwd-err").textContent = "";
+  $("recpwd").hidden = false;
+  setTimeout(() => $("recpwd-input").focus(), 30);
+}
+
+function showRecoveryCode(code) {
+  recCodeText = code || "";
+  $("reccode-text").textContent = recCodeText;
+  $("rec-confirm").value = "";
+  $("reccode-err").textContent = "";
+  $("recpwd").hidden = true;
+  $("reccode").hidden = false;
+  setTimeout(() => $("rec-confirm").focus(), 30);
+}
+
+// 抄写核对时统一口径：去分隔符、转大写、容错 O/0 与 I/L
+function normCode(s) {
+  return String(s || "")
+    .replace(/[-_\s]/g, "")
+    .toUpperCase()
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1");
+}
+
+function showRecError(text) {
+  if (!$("recpwd").hidden) { $("recpwd-err").textContent = text; return; }
+  if (!$("recover").hidden) { $("recover-err").textContent = text; return; }
+  if (!$("recnew").hidden) { $("recnew-err").textContent = text; return; }
+  toast("err", text);
+}
+
+$("btn-recover").addEventListener("click", () => {
+  $("recover-input").value = "";
+  $("recover-err").textContent = "";
+  $("recover").hidden = false;
+  setTimeout(() => $("recover-input").focus(), 30);
+});
+
+$("recpwd-ok").addEventListener("click", () => {
+  const pwd = $("recpwd-input").value;
+  if (!pwd) { $("recpwd-err").textContent = "请输入当前主密码"; return; }
+  $("recpwd-err").textContent = "";
+  send({ t: "set_recovery", pwd });
+});
+$("recpwd-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") $("recpwd-ok").click();
+});
+$("recpwd-cancel").addEventListener("click", () => {
+  $("recpwd").hidden = true;
+  $("recpwd-input").value = "";
+});
+
+$("reccode-ok").addEventListener("click", () => {
+  const want = normCode(recCodeText).slice(-8);
+  const got = normCode($("rec-confirm").value);
+  if (got.length < 8) {
+    $("reccode-err").textContent = "请输入最后 8 个字符";
+    return;
+  }
+  if (got.slice(-8) !== want) {
+    $("reccode-err").textContent = "对不上，请再核对一下抄写的最后 8 位";
+    return;
+  }
+  $("reccode").hidden = true;
+  recCodeText = "";
+  toast("ok", "恢复码已生效。请把那张纸收在安全的地方。");
+});
+
+$("reccode-cancel").addEventListener("click", () => {
+  $("reccode").hidden = true;
+  recCodeText = "";
+  // 码已经生成并写进密库了，没抄下来等于没有——必须说明白
+  toast("warn", "恢复码已生成但没有确认抄写。忘了密码时它救不了你，建议重新设一次。");
+});
+
+$("recover-ok").addEventListener("click", () => {
+  const code = $("recover-input").value.trim();
+  if (!code) { $("recover-err").textContent = "请输入恢复码"; return; }
+  $("recover-err").textContent = "";
+  send({ t: "recover", code });
+});
+$("recover-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") $("recover-ok").click();
+});
+$("recover-cancel").addEventListener("click", () => {
+  $("recover").hidden = true;
+  $("recover-input").value = "";
+});
+
+$("recnew-ok").addEventListener("click", () => {
+  const n1 = $("recnew-1").value;
+  const n2 = $("recnew-2").value;
+  if (n1.length < 6) { $("recnew-err").textContent = "新密码至少 6 位"; return; }
+  if (n1 !== n2) { $("recnew-err").textContent = "两次输入的新密码不一致"; return; }
+  $("recnew-err").textContent = "";
+  send({ t: "recover_set_password", new: n1 });
+});
+$("recnew-cancel").addEventListener("click", () => {
+  $("recnew").hidden = true;
+  $("recnew-1").value = "";
+  $("recnew-2").value = "";
+  send({ t: "recover_cancel" });
 });

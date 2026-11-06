@@ -12,6 +12,7 @@ pub mod config;
 pub mod crypto;
 pub mod format;
 pub mod merge;
+pub mod restore;
 pub mod vault;
 
 pub use format::{Account, Project, MAX_SLOTS};

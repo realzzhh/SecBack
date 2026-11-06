@@ -7,16 +7,42 @@
 use crate::crypto::{NONCE_LEN, SALT_LEN};
 
 pub const MAGIC: [u8; 8] = [b'S', b'E', b'C', b'B', b'K', 0x00, 0x01, 0x00];
-pub const HEADER_SIZE: usize = 64;
+
+/// v1：64 字节头，密钥直接由口令派生。
+pub const HEADER_SIZE_V1: usize = 64;
+/// v2：256 字节头。多了一个随机数据密钥（DEK），被口令和恢复码各包一份。
+/// 口令忘了可以用恢复码解出 DEK，不用重新加密整个库。
+pub const HEADER_SIZE_V2: usize = 256;
+
+/// 老代码按 64 字节的头算偏移，v1 路径继续用它。
+pub const HEADER_SIZE: usize = HEADER_SIZE_V1;
+
 pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION_V2: u16 = 2;
+
 pub const MAX_SLOTS: usize = 3;
 pub const MAX_PROJECTS: u32 = 100_000;
 
+/// 数据加密密钥长度（AES-256）。
+pub const DEK_LEN: usize = 32;
+/// 被包起来的 DEK：32 字节密文 + 16 字节 GCM tag。
+pub const WRAPPED_DEK_LEN: usize = DEK_LEN + 16;
+/// flags 第 0 位：v2 头里带了恢复槽。
+pub const FLAG_RECOVERY: u16 = 1;
+
 const OFF_VERSION: usize = 8;
+const OFF_FLAGS: usize = 10;
 const OFF_ITERATIONS: usize = 12;
 const OFF_SALT: usize = 16;
 const OFF_NONCE: usize = 32;
 const OFF_PAYLOAD: usize = 48;
+
+// v2 扩展区（64 之后）
+const OFF_WRAP_NONCE: usize = 64;
+const OFF_WRAPPED_DEK: usize = 80;
+const OFF_REC_SALT: usize = 128;
+const OFF_REC_NONCE: usize = 144;
+const OFF_REC_WRAPPED: usize = 156;
 
 pub type ProjectId = [u8; 16];
 
@@ -73,26 +99,82 @@ impl Project {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
     pub version: u16,
+    pub flags: u16,
     pub iterations: u32,
     pub salt: [u8; SALT_LEN],
     pub nonce: [u8; NONCE_LEN],
     pub payload_size: u64,
+
+    // ---- 以下字段仅 v2 使用；v1 里全是 0 ----
+    /// 包 DEK 用的 nonce
+    pub wrap_nonce: [u8; NONCE_LEN],
+    /// 用口令派生的 KEK 包起来的 DEK
+    pub wrapped_dek: [u8; WRAPPED_DEK_LEN],
+    /// 恢复码用的盐
+    pub recovery_salt: [u8; SALT_LEN],
+    /// 包 DEK 用的恢复 nonce
+    pub recovery_nonce: [u8; NONCE_LEN],
+    /// 用恢复码派生的 KEK 包起来的 DEK
+    pub recovery_wrapped_dek: [u8; WRAPPED_DEK_LEN],
+}
+
+impl Default for Header {
+    fn default() -> Self {
+        Header {
+            version: FORMAT_VERSION,
+            flags: 0,
+            iterations: 0,
+            salt: [0; SALT_LEN],
+            nonce: [0; NONCE_LEN],
+            payload_size: 0,
+            wrap_nonce: [0; NONCE_LEN],
+            wrapped_dek: [0; WRAPPED_DEK_LEN],
+            recovery_salt: [0; SALT_LEN],
+            recovery_nonce: [0; NONCE_LEN],
+            recovery_wrapped_dek: [0; WRAPPED_DEK_LEN],
+        }
+    }
 }
 
 impl Header {
-    pub fn encode(&self) -> [u8; HEADER_SIZE] {
-        let mut h = [0u8; HEADER_SIZE];
+    /// 这个头序列化之后有多长。
+    pub fn size(&self) -> usize {
+        if self.version >= FORMAT_VERSION_V2 {
+            HEADER_SIZE_V2
+        } else {
+            HEADER_SIZE_V1
+        }
+    }
+
+    /// 是不是带恢复槽的库。
+    pub fn has_recovery(&self) -> bool {
+        self.version >= FORMAT_VERSION_V2 && (self.flags & FLAG_RECOVERY) != 0
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut h = vec![0u8; self.size()];
         h[..8].copy_from_slice(&MAGIC);
         h[OFF_VERSION..OFF_VERSION + 2].copy_from_slice(&self.version.to_le_bytes());
+        h[OFF_FLAGS..OFF_FLAGS + 2].copy_from_slice(&self.flags.to_le_bytes());
         h[OFF_ITERATIONS..OFF_ITERATIONS + 4].copy_from_slice(&self.iterations.to_le_bytes());
         h[OFF_SALT..OFF_SALT + SALT_LEN].copy_from_slice(&self.salt);
         h[OFF_NONCE..OFF_NONCE + NONCE_LEN].copy_from_slice(&self.nonce);
         h[OFF_PAYLOAD..OFF_PAYLOAD + 8].copy_from_slice(&self.payload_size.to_le_bytes());
+
+        if self.version >= FORMAT_VERSION_V2 {
+            h[OFF_WRAP_NONCE..OFF_WRAP_NONCE + NONCE_LEN].copy_from_slice(&self.wrap_nonce);
+            h[OFF_WRAPPED_DEK..OFF_WRAPPED_DEK + WRAPPED_DEK_LEN]
+                .copy_from_slice(&self.wrapped_dek);
+            h[OFF_REC_SALT..OFF_REC_SALT + SALT_LEN].copy_from_slice(&self.recovery_salt);
+            h[OFF_REC_NONCE..OFF_REC_NONCE + NONCE_LEN].copy_from_slice(&self.recovery_nonce);
+            h[OFF_REC_WRAPPED..OFF_REC_WRAPPED + WRAPPED_DEK_LEN]
+                .copy_from_slice(&self.recovery_wrapped_dek);
+        }
         h
     }
 
     pub fn parse(buf: &[u8]) -> Result<Header, ParseError> {
-        if buf.len() < HEADER_SIZE {
+        if buf.len() < HEADER_SIZE_V1 {
             return Err(ParseError::TooSmall);
         }
         if buf[..8] != MAGIC {
@@ -100,9 +182,26 @@ impl Header {
         }
 
         let version = u16::from_le_bytes([buf[OFF_VERSION], buf[OFF_VERSION + 1]]);
-        if version != FORMAT_VERSION {
+        if version != FORMAT_VERSION && version != FORMAT_VERSION_V2 {
             return Err(ParseError::Version(version));
         }
+
+        let need = if version >= FORMAT_VERSION_V2 {
+            HEADER_SIZE_V2
+        } else {
+            HEADER_SIZE_V1
+        };
+        if buf.len() < need {
+            return Err(ParseError::TooSmall);
+        }
+
+        // v1 的第 10..12 字节是保留区（当年写的是 0），
+        // 所以这里只在 v2 才把 flags 当回事，免得旧文件里的残留字节被误读。
+        let flags = if version >= FORMAT_VERSION_V2 {
+            u16::from_le_bytes([buf[OFF_FLAGS], buf[OFF_FLAGS + 1]])
+        } else {
+            0
+        };
 
         let mut salt = [0u8; SALT_LEN];
         salt.copy_from_slice(&buf[OFF_SALT..OFF_SALT + SALT_LEN]);
@@ -123,13 +222,36 @@ impl Header {
         ps.copy_from_slice(&buf[OFF_PAYLOAD..OFF_PAYLOAD + 8]);
         let payload_size = u64::from_le_bytes(ps);
 
-        Ok(Header {
+        let mut h = Header {
             version,
+            flags,
             iterations,
             salt,
             nonce,
             payload_size,
-        })
+            ..Default::default()
+        };
+
+        if version >= FORMAT_VERSION_V2 {
+            h.wrap_nonce
+                .copy_from_slice(&buf[OFF_WRAP_NONCE..OFF_WRAP_NONCE + NONCE_LEN]);
+            h.wrapped_dek
+                .copy_from_slice(&buf[OFF_WRAPPED_DEK..OFF_WRAPPED_DEK + WRAPPED_DEK_LEN]);
+            h.recovery_salt
+                .copy_from_slice(&buf[OFF_REC_SALT..OFF_REC_SALT + SALT_LEN]);
+            h.recovery_nonce
+                .copy_from_slice(&buf[OFF_REC_NONCE..OFF_REC_NONCE + NONCE_LEN]);
+            h.recovery_wrapped_dek.copy_from_slice(
+                &buf[OFF_REC_WRAPPED..OFF_REC_WRAPPED + WRAPPED_DEK_LEN],
+            );
+
+            // 声称有恢复槽，但槽里全是 0，说明头被改过或者写坏了
+            if h.has_recovery() && h.recovery_wrapped_dek == [0u8; WRAPPED_DEK_LEN] {
+                return Err(ParseError::Corrupt);
+            }
+        }
+
+        Ok(h)
     }
 }
 
@@ -309,9 +431,10 @@ mod tests {
             salt: [1u8; 16],
             nonce: [2u8; 12],
             payload_size: 146,
+            ..Default::default()
         };
         let bytes = h.encode();
-        assert_eq!(bytes.len(), HEADER_SIZE);
+        assert_eq!(bytes.len(), HEADER_SIZE_V1);
         let back = Header::parse(&bytes).unwrap();
         assert_eq!(back.iterations, 200_000);
         assert_eq!(back.salt, [1u8; 16]);
@@ -320,7 +443,7 @@ mod tests {
 
     #[test]
     fn rejects_bad_magic() {
-        let mut bytes = [0u8; HEADER_SIZE];
+        let mut bytes = [0u8; HEADER_SIZE_V1];
         bytes[..8].copy_from_slice(b"NOTAVAUL");
         assert_eq!(Header::parse(&bytes), Err(ParseError::NotVault));
     }
@@ -328,13 +451,14 @@ mod tests {
     #[test]
     fn rejects_future_version() {
         let h = Header {
-            version: 2,
+            version: 3,
             iterations: 200_000,
             salt: [0; 16],
             nonce: [0; 12],
             payload_size: 0,
+            ..Default::default()
         };
-        assert_eq!(Header::parse(&h.encode()), Err(ParseError::Version(2)));
+        assert_eq!(Header::parse(&h.encode()), Err(ParseError::Version(3)));
     }
 
     #[test]
@@ -392,5 +516,90 @@ mod tests {
         // 2020-01-01 00:00:00 UTC = 1577836800000 ms
         let ft = (1_577_836_800u64 + 11_644_473_600) * 10_000_000;
         assert_eq!(filetime_to_unix_ms(ft), 1_577_836_800_000);
+    }
+
+    // ---- v2 ----
+
+    #[test]
+    fn v2_roundtrip_with_recovery() {
+        let h = Header {
+            version: FORMAT_VERSION_V2,
+            flags: FLAG_RECOVERY,
+            iterations: 200_000,
+            salt: [7; 16],
+            nonce: [8; 12],
+            payload_size: 999,
+            wrap_nonce: [9; 12],
+            wrapped_dek: [0xAB; WRAPPED_DEK_LEN],
+            recovery_salt: [0xCD; 16],
+            recovery_nonce: [0xEF; 12],
+            recovery_wrapped_dek: [0x11; WRAPPED_DEK_LEN],
+        };
+        let bytes = h.encode();
+        assert_eq!(bytes.len(), HEADER_SIZE_V2);
+
+        let back = Header::parse(&bytes).unwrap();
+        assert_eq!(back.version, FORMAT_VERSION_V2);
+        assert!(back.has_recovery());
+        assert_eq!(back.wrapped_dek, [0xAB; WRAPPED_DEK_LEN]);
+        assert_eq!(back.recovery_wrapped_dek, [0x11; WRAPPED_DEK_LEN]);
+        assert_eq!(back.payload_size, 999);
+        assert_eq!(back.size(), HEADER_SIZE_V2);
+    }
+
+    #[test]
+    fn v2_without_recovery_allowed() {
+        let h = Header {
+            version: FORMAT_VERSION_V2,
+            flags: 0,
+            iterations: 200_000,
+            salt: [1; 16],
+            nonce: [2; 12],
+            payload_size: 10,
+            ..Default::default()
+        };
+        let back = Header::parse(&h.encode()).unwrap();
+        assert!(!back.has_recovery());
+    }
+
+    #[test]
+    fn v2_claims_recovery_but_empty_is_corrupt() {
+        let h = Header {
+            version: FORMAT_VERSION_V2,
+            flags: FLAG_RECOVERY,
+            iterations: 200_000,
+            ..Default::default()
+        };
+        assert_eq!(Header::parse(&h.encode()), Err(ParseError::Corrupt));
+    }
+
+    #[test]
+    fn v2_header_too_short_rejected() {
+        let mut buf = vec![0u8; 200]; // 比 256 短
+        buf[..8].copy_from_slice(&MAGIC);
+        buf[8..10].copy_from_slice(&FORMAT_VERSION_V2.to_le_bytes());
+        buf[12..16].copy_from_slice(&200_000u32.to_le_bytes());
+        assert_eq!(Header::parse(&buf), Err(ParseError::TooSmall));
+    }
+
+    /// v1 的字节布局一个都不能变——这是跨实现互通的底线。
+    #[test]
+    fn v1_encoding_unchanged() {
+        let h = Header {
+            version: FORMAT_VERSION,
+            iterations: 200_000,
+            salt: [3; 16],
+            nonce: [4; 12],
+            payload_size: 100,
+            ..Default::default()
+        };
+        let bytes = h.encode();
+        assert_eq!(bytes.len(), 64);
+        assert_eq!(&bytes[..8], &MAGIC);
+        assert_eq!(&bytes[8..10], &1u16.to_le_bytes());
+        // 保留区必须是 0：v2 的 flags 绝不能漏到 v1 的字节里
+        assert_eq!(&bytes[10..12], &[0u8, 0u8]);
+        assert_eq!(&bytes[16..32], &[3u8; 16]);
+        assert_eq!(&bytes[48..56], &100u64.to_le_bytes());
     }
 }

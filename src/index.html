@@ -21,6 +21,8 @@
     <button id="login-go" class="login-btn">进 入</button>
 
     <p id="login-hint" class="login-hint"></p>
+
+    <button id="btn-recover" class="link-btn">主密码忘了？用恢复码打开</button>
   </div>
 </div>
 
@@ -210,6 +212,103 @@
     <div class="modal-foot">
       <button class="btn ghost" id="pwd-cancel">取消</button>
       <button class="btn primary" id="pwd-ok">修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置恢复码：先验证当前密码 -->
+<div class="overlay" id="recpwd" hidden>
+  <div class="modal narrow" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>设置恢复码</h2>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text">先输入当前主密码，确认是本人操作。</p>
+      <label class="field">
+        <span>当前主密码</span>
+        <input id="recpwd-input" type="password" autocomplete="off">
+      </label>
+      <p class="confirm-note" id="recpwd-err"></p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="recpwd-cancel">取消</button>
+      <button class="btn primary" id="recpwd-ok">生成恢复码</button>
+    </div>
+  </div>
+</div>
+
+<!-- 恢复码展示 + 抄写确认 -->
+<div class="overlay" id="reccode" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>恢复码</h2>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text">这串码可以代替主密码打开这个密库。<b>请抄在纸上，和电脑分开保管。</b></p>
+      <div class="rec-code" id="reccode-text"></div>
+      <p class="confirm-note">
+        · 存在电脑里等于没设——硬盘坏了两个一起没<br>
+        · 重新生成会让旧的那串立即失效<br>
+        · 大小写和短横都不用计较，抄的时候别管格式
+      </p>
+      <div class="rec-verify">
+        <p class="confirm-text">为确认抄对了，请输入<b>最后 8 个字符</b>：</p>
+        <label class="field">
+          <input id="rec-confirm" maxlength="24" autocomplete="off" placeholder="最后 8 位">
+        </label>
+        <p class="confirm-note" id="reccode-err"></p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="reccode-cancel">稍后再说</button>
+      <button class="btn primary" id="reccode-ok">我已抄好</button>
+    </div>
+  </div>
+</div>
+
+<!-- 用恢复码打开 -->
+<div class="overlay" id="recover" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>用恢复码打开</h2>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text">输入当初抄下来的恢复码。大小写和短横都不计较，空格也行。</p>
+      <label class="field">
+        <span>恢复码</span>
+        <input id="recover-input" autocomplete="off" placeholder="XXXX-XXXX-XXXX-...">
+      </label>
+      <p class="confirm-note" id="recover-err"></p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="recover-cancel">取消</button>
+      <button class="btn primary" id="recover-ok">解锁</button>
+    </div>
+  </div>
+</div>
+
+<!-- 恢复成功后设新密码 -->
+<div class="overlay" id="recnew" hidden>
+  <div class="modal narrow" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2>设置新主密码</h2>
+    </div>
+    <div class="modal-body">
+      <p class="confirm-text">已经用恢复码解开了。现在设一个新密码，以后就用它进入。</p>
+      <label class="field">
+        <span>新密码</span>
+        <input id="recnew-1" type="password" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>确认新密码</span>
+        <input id="recnew-2" type="password" autocomplete="off">
+      </label>
+      <p class="confirm-note" id="recnew-err"></p>
+      <p class="confirm-note">恢复码依然有效，建议继续留着备用。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="recnew-cancel">取消</button>
+      <button class="btn primary" id="recnew-ok">设好了，进入</button>
     </div>
   </div>
 </div>
