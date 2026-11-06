@@ -15,7 +15,9 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
-use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{
+    CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -53,6 +55,12 @@ struct AppState {
     pending: Mutex<Option<PendingImport>>,
     /// 启动时配置解析失败的原因。有值时挡住登录，别让用户在错误的库上开始写。
     config_error: Option<String>,
+    /// 当前是不是深色。前端存在 localStorage 里，启动后会同步过来；
+    /// 这里存一份是为了菜单重建时能恢复对勾位置。
+    dark_theme: Mutex<bool>,
+    /// 「外观」里那两个可勾选项的句柄。
+    /// 必须存句柄：Menu::get() 只查顶层项，钻不进子菜单里。
+    theme_checks: Mutex<Option<(CheckMenuItem<tauri::Wry>, CheckMenuItem<tauri::Wry>)>>,
 }
 
 /// 导入流程的中间状态。密码在这里短暂停留，导入结束或取消时立刻擦掉。
@@ -547,10 +555,26 @@ fn install_menu(app: &AppHandle, unlocked: bool) {
                 .build(app)?,
         );
 
+        // 菜单会被反复重建（登录/锁定时），勾选状态要从 state 里读回来，
+        // 否则切一次主题再锁一次，对勾就没了。
+        let dark_now = *lock!(app.state::<AppState>().dark_theme);
+
+        let dark_item = CheckMenuItemBuilder::with_id("theme-dark", "深色")
+            .checked(dark_now)
+            .build(app)?;
+        let light_item = CheckMenuItemBuilder::with_id("theme-light", "浅色")
+            .checked(!dark_now)
+            .build(app)?;
+
         let view = SubmenuBuilder::new(app, "外观")
-            .item(&MenuItemBuilder::with_id("theme-dark", "深色").build(app)?)
-            .item(&MenuItemBuilder::with_id("theme-light", "浅色").build(app)?)
+            .item(&dark_item)
+            .item(&light_item)
             .build()?;
+
+        // 把句柄存起来，后面切换主题时直接拨这两项
+        if let Some(st) = app.try_state::<AppState>() {
+            *lock!(st.theme_checks) = Some((dark_item.clone(), light_item.clone()));
+        }
 
         let help = SubmenuBuilder::new(app, "帮助")
             .item(&MenuItemBuilder::with_id("about", "关于 SecBack").build(app)?)
@@ -578,6 +602,28 @@ fn set_window_theme(app: &AppHandle, dark: bool) {
             tauri::Theme::Light
         }));
     }
+}
+
+/// 让「外观」菜单里的对勾跟当前主题一致。
+/// 菜单不重建的时候勾选状态不会自己变，得手动拨。
+fn set_theme_checks(app: &AppHandle, dark: bool) {
+    let Some(st) = app.try_state::<AppState>() else {
+        return;
+    };
+    let guard = lock!(st.theme_checks);
+    if let Some((dark_item, light_item)) = guard.as_ref() {
+        let _ = dark_item.set_checked(dark);
+        let _ = light_item.set_checked(!dark);
+    }
+}
+
+/// 主题变更的统一入口：记状态、调标题栏、拨对勾。
+/// 注意这里**不发消息给前端**——发消息是在菜单点击那里做的，
+/// 否则会和前端回报的 theme_sync 互相触发，绕成死循环。
+fn apply_theme(app: &AppHandle, st: &AppState, dark: bool) {
+    *lock!(st.dark_theme) = dark;
+    set_window_theme(app, dark);
+    set_theme_checks(app, dark);
 }
 
 fn pick_and_import(app: AppHandle) {    app.dialog()
@@ -815,9 +861,10 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
             }
         }
 
-        // 前端恢复上次选的外观时告诉宿主，好把标题栏一起调过来
+        // 前端恢复上次选的外观时告诉宿主。这里只更新宿主状态、不回消息——
+        // 前端那边已经应用过了，回一条 cmd 会和它再回报一次，绕成死循环。
         "theme_sync" => {
-            set_window_theme(app, msg["dark"].as_bool().unwrap_or(true));
+            apply_theme(app, st, msg["dark"].as_bool().unwrap_or(true));
         }
 
         "about" => {
@@ -855,6 +902,8 @@ fn main() {
         last_activity: Mutex::new(Instant::now()),
         pending: Mutex::new(None),
         config_error,
+        dark_theme: Mutex::new(true),
+        theme_checks: Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -899,11 +948,11 @@ fn main() {
                 "import" => pick_and_import(app.clone()),
                 "changePwd" => push(app, json!({ "t": "cmd", "name": "changePwd" })),
                 "theme-dark" => {
-                    set_window_theme(app, true);
+                    apply_theme(app, st.inner(), true);
                     push(app, json!({ "t": "cmd", "name": "theme-dark" }));
                 }
                 "theme-light" => {
-                    set_window_theme(app, false);
+                    apply_theme(app, st.inner(), false);
                     push(app, json!({ "t": "cmd", "name": "theme-light" }));
                 }
                 "lock" => do_lock(app, st.inner()),
