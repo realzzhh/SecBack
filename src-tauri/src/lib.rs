@@ -89,11 +89,24 @@ macro_rules! lock {
     };
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Android 上没有"exe 同目录"这个概念：进程的可执行文件是系统的 app_process，
+/// current_exe() 会指到 `/system/bin`——那是只读系统分区，写密库必然失败。
+///
+/// 换成应用私有目录。这个路径等于 `Context.getFilesDir()`，
+/// 卸载 app 时会被系统一并清掉（符合预期：密库属于这个应用）。
+///
+/// 包名必须和 `tauri.conf.json` 里的 identifier 一致；改包名时这里要同步。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn exe_dir() -> PathBuf {
+    PathBuf::from("/data/data/com.secback.vault/files")
 }
 
 /// 密库位置：先看 SECBACK_VAULT（测试/调试用），否则按 secback.cfg 的规则解析。
