@@ -4,8 +4,10 @@
 core/target/
 src-tauri/target/
 
-# Tauri 根据配置自动生成的 schema，每次构建会重建
-src-tauri/gen/
+# Tauri 根据配置自动生成的 schema，每次构建会重建。
+# 注意：gen/android 例外——那是真正的 Android 工程（gradle、Manifest 都要改），
+# 属于源码，必须提交。
+src-tauri/gen/schemas/
 
 # ---------------------------------------------------------------- 依赖
 node_modules/
@@ -50,3 +52,13 @@ prn
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# ---------------------------------------------------------------- Android
+# local.properties 里是本机 SDK 路径，每个人的机器都不一样
+src-tauri/gen/android/local.properties
+# 编译出来的 .so（debug 版 129MB）和 gradle 产物
+src-tauri/gen/android/app/src/main/jniLibs/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/build/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/buildSrc/build/
