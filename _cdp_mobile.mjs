@@ -71,7 +71,7 @@ ws.addEventListener("open", async () => {
         return "注入 " + s.textContent.length + " 字符";
       })()`;
       const r = await cmd("Runtime.evaluate", { expression: js, returnByValue: true });
-      console.log(r?.result?.value || "");
+      console.error(r?.result?.value || "");
     }
 
     // 停一下让样式重排和动画稳定

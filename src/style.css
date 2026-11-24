@@ -1293,3 +1293,21 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     padding: 10px;
   }
 }
+
+/* 详情页在窄屏是全屏的：列表那一排工具栏（搜索/新增/导入/锁定）留着只会挤占高度，
+   而且和详情自己的头部（返回 + 标题 + 编辑/删除）功能重叠。
+   隐藏之后 .detail 会顶到状态栏，所以补一条安全区内边距。 */
+@media (max-width: 700px) {
+  body.showing-detail .toolbar {
+    display: none;
+  }
+
+  body.showing-detail .detail {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* 返回箭头和标题之间留点距离，否则贴着左边不好点 */
+  .pane-head {
+    padding-left: 8px;
+  }
+}
