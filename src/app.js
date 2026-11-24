@@ -196,6 +196,10 @@ function renderDetail() {
 
   $("placeholder").hidden = !!p;
   $("pane").hidden = !p;
+
+  // 窄屏下选中项目就切到详情视图。桌面没有这个类的样式，加了也无副作用。
+  document.body.classList.toggle("showing-detail", !!p);
+
   if (!p) return;
 
   $("p-name").textContent = p.name;
@@ -376,6 +380,8 @@ onHost(raw => {
       $("recnew-1").value = "";
       $("recnew-2").value = "";
       recCodeText = "";
+      // 退出登录后回到列表视图，别让下次登录直接停在详情页
+      document.body.classList.remove("showing-detail");
       $("m-slots").innerHTML = "";
       $("m-name").value = "";
       $("m-remark").value = "";
@@ -473,11 +479,22 @@ $("list").addEventListener("click", e => {
   const item = e.target.closest(".item");
   if (!item) return;
   const id = item.dataset.id;
-  if (id === S.selected) return;
+  if (id === S.selected) {
+    // 从详情按返回回到列表后，再点同一个项目要能重新进去。
+    // 不处理的话这里会直接 return，界面看起来"点了没反应"。
+    document.body.classList.add("showing-detail");
+    return;
+  }
   S.selected = id;
   secrets = {};
   send({ t: "select", id });
   render();
+});
+
+// 窄屏才可见的返回按钮：退回列表，但不清选中——
+// 这样再点同一个项目还能进来。
+$("pane-back").addEventListener("click", () => {
+  document.body.classList.remove("showing-detail");
 });
 
 // ------------------------------------------------------------------ 详情交互
@@ -1043,3 +1060,23 @@ $("recnew-cancel").addEventListener("click", () => {
   $("recnew-2").value = "";
   send({ t: "recover_cancel" });
 });
+
+// ---------------------------------------------------------------- 软键盘适配
+//
+// Android 15（API 35）强制 edge-to-edge，Manifest 里的 adjustResize
+// 不再自动缩小 WebView——键盘弹起来直接盖住弹层底部，保存按钮点不到。
+//
+// visualViewport.height 是"真正还能看见的高度"，键盘弹起时它会变小。
+// 把它写进 CSS 变量，弹层的 max-height 跟着变。
+(function setupViewportHeight() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+
+  const apply = () => {
+    document.documentElement.style.setProperty("--vvh", vv.height + "px");
+  };
+
+  vv.addEventListener("resize", apply);
+  vv.addEventListener("scroll", apply);
+  apply();
+})();

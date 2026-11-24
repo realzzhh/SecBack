@@ -2,6 +2,13 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<!-- viewport-fit=cover 是 env(safe-area-inset-*) 生效的前提：
+     不加这行，刘海屏/状态栏的留白全是 0，顶部工具栏会被状态栏压住。
+     interactive-widget=resizes-content 让软键盘弹起时缩小布局视口，
+     否则 100vh 不变，弹层底部会被键盘盖住（Android 15 强制 edge-to-edge 后
+     Manifest 的 adjustResize 已经不管用了）。
+     maximum-scale 和 user-scalable 关掉双击缩放。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <title>SecBack</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -80,6 +87,7 @@
 
       <div class="pane" id="pane" hidden>
         <div class="pane-head">
+          <button class="pane-back" id="pane-back" type="button" aria-label="返回列表">‹</button>
           <div>
             <h1 id="p-name"></h1>
             <p id="p-remark" class="p-remark"></p>

@@ -1122,3 +1122,174 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   border-color: #2b4463;
   color: #7bb5ff;
 }
+
+/* ============================================================
+   移动端适配（2026-11-24）
+   ------------------------------------------------------------
+   桌面是左右分栏：左边列表、右边详情。手机上这么排会把详情挤成一条缝，
+   所以窄屏改成「列表 ↔ 详情」两级：一次只显示一个，靠返回按钮切换。
+
+   断点取 700px：手机横屏（约 640~900）也能覆盖到，平板竖屏（768+）
+   继续用桌面布局，因为那个宽度放两栏还看得清。
+   ============================================================ */
+
+/* 返回按钮：桌面永远不显示，只有窄屏才有 */
+.pane-back {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-right: 2px;
+  flex: none;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pane-back:hover { background: var(--line-soft); color: var(--text); }
+.pane-back:active { background: var(--line); }
+
+@media (max-width: 700px) {
+  /* ---- 单栏：列表和详情互斥 ---- */
+  .body {
+    display: block;
+    position: relative;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: 100%;
+    border-right: 0;
+  }
+
+  .detail {
+    position: absolute;
+    inset: 0;
+    display: none;
+    background: var(--bg);
+    z-index: 5;
+  }
+
+  /* JS 在选中项目时给它加上，返回时去掉 */
+  body.showing-detail .detail { display: block; }
+  body.showing-detail .sidebar { display: none; }
+
+  .pane-back { display: flex; }
+
+  /* 详情头部吸顶，滚动时标题和返回键不会跑掉 */
+  .pane-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  /* ---- 触摸目标：手指不是鼠标，44px 是下限 ---- */
+  .item { min-height: 56px; }
+  .btn { min-height: 44px; }
+  .tool { min-width: 44px; min-height: 44px; }
+  .icon-btn { min-width: 44px; min-height: 44px; }
+  .mini { min-height: 40px; }
+  .pane-back { width: 44px; height: 44px; }
+
+  /* ---- 工具栏：挤一行放不下，收紧间距 + 隐藏次要项 ---- */
+  .toolbar {
+    height: 54px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .search {
+    flex: 1;
+    min-width: 0;   /* 不加这行输入框会被内容撑破，把按钮挤出去 */
+  }
+
+  .search input { height: 38px; }
+
+  .divider { display: none; }
+
+  /* 排序按钮在手机上用得少，先藏起来（正式版收进「更多」菜单） */
+  .tool[data-act="up"],
+  .tool[data-act="down"],
+  #btn-up,
+  #btn-down { display: none; }
+
+  /* ---- 列表项与详情的内边距 ---- */
+  .list { padding: 8px; }
+  .pane { padding: 14px 14px 24px; }
+}
+
+/* 刘海屏 / 手势条留白。Tauri 的 WebView 默认 edge-to-edge，
+   不处理的话顶部标题会被状态栏压住。 */
+@supports (padding: env(safe-area-inset-top)) {
+  @media (max-width: 700px) {
+    .toolbar {
+      padding-top: env(safe-area-inset-top);
+      height: calc(54px + env(safe-area-inset-top));
+    }
+    .login { padding-top: env(safe-area-inset-top); }
+    .pane { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  }
+}
+
+/* ---- 移动端弹层 ----
+   桌面 .modal 写死 560px，手机上直接溢出屏幕；100vh 也不随软键盘变化。
+   这里改成撑满可视宽、限高、内部滚动，配合 Manifest 的 adjustResize。 */
+@media (max-width: 700px) {
+  .overlay {
+    padding: 10px;
+    align-items: center;
+  }
+
+  .modal,
+  .modal.narrow {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100vh - 20px);
+    border-radius: 12px;
+  }
+
+  /* 键盘弹起后 body 变矮，让内容自己滚，别把按钮顶出去 */
+  .modal-body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .modal-foot { flex: none; }
+
+  /* 账户槽位原来是「账号 / 密码」并排，窄屏改单列，否则每个框只剩一半宽 */
+  .slot-edit .fields,
+  .slot-edit .grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* 弹层高度策略。
+   试过 visualViewport 和 viewport 的 interactive-widget=resizes-content，
+   在 Android 15 上都不生效——edge-to-edge 之后 WebView 的布局视口压根不随键盘变。
+   所以改成看"有没有输入框聚焦"：聚焦基本等于键盘弹起，这时把弹层压到半屏，
+   底部的保存按钮就能落在键盘上方。 */
+@media (max-width: 700px) {
+  .modal,
+  .modal.narrow {
+    max-height: 85vh;
+  }
+
+  .modal:focus-within {
+    max-height: 50vh;
+  }
+
+  .overlay {
+    /* grid 的 place-items：垂直靠上、水平居中。
+       竖直居中会让 50vh 的弹层落到 25vh~75vh，底部照样压在键盘底下。 */
+    place-items: start center;
+    padding: 10px;
+  }
+}
