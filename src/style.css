@@ -1431,3 +1431,58 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   height: 20px;
   display: block;
 }
+
+/* ============================================================
+   窄屏弹层改为整页（2026-11-24 晚，根据 P10 实机反馈）
+   ------------------------------------------------------------
+   上一版为了躲开软键盘，把弹层压到 50vh。实机上用下来问题更大：
+   「新建项目」这种简单表单只占上半屏，3 个账户槽要滚动才看得全，
+   比桌面版还难填。
+
+   改成整页铺满：
+     头部固定 / 内容区滚动 / 底部按钮固定
+   内容不多时（新建项目就 3 个槽）一眼看全，根本不用滚；
+   内容多（比如备注很长）才滚动，这是正常的。
+
+   键盘弹起时底部按钮可能被盖住，需要点「完成」收起键盘——
+   这个取舍比"永远只有半屏"划算。
+   ============================================================ */
+@media (max-width: 700px) {
+  .overlay {
+    padding: 0;
+    place-items: stretch;   /* 子元素铺满容器，不再是居中 */
+  }
+
+  .modal,
+  .modal.narrow {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    animation: none;        /* 整页切换不需要弹跳动画，闪一下反而怪 */
+  }
+
+  /* 覆盖前面那条 focus-within 收缩规则 */
+  .modal:focus-within {
+    max-height: 100%;
+  }
+
+  .modal-head {
+    flex: none;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .modal-body {
+    flex: 1;
+    /* flex 子项默认 min-height:auto，不加这行它不会收缩，overflow 就失效 */
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-foot {
+    flex: none;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}
