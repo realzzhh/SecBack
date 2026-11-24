@@ -104,6 +104,42 @@
       </div>
     </main>
   </div>
+
+  <!-- 底部操作栏。
+       只在窄屏出现（桌面保留了原生菜单栏，不需要这个）。
+       Android 上根本没有菜单——tauri::menu 整个模块在移动端不存在，
+       所以新增/导入/锁定/改密这些入口必须做到界面里。 -->
+  <nav class="tabbar" id="tabbar">
+    <button class="tab" id="tab-new" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      <span class="tab-text">新增</span>
+    </button>
+    <button class="tab" id="tab-import" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4"/><path d="M5 19h14"/></svg>
+      <span class="tab-text">导入</span>
+    </button>
+    <button class="tab" id="tab-lock" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+      <span class="tab-text">锁定</span>
+    </button>
+    <button class="tab" id="tab-more" type="button">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+      <span class="tab-text">更多</span>
+    </button>
+  </nav>
+</div>
+
+<!-- 「更多」抽屉：放不常用的功能。
+     sheet 从底部滑上来，比弹层更贴近手机习惯。 -->
+<div class="overlay" id="sheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-grip"></div>
+    <button class="sheet-item" id="sheet-changePwd" type="button">修改主密码</button>
+    <button class="sheet-item" id="sheet-recovery" type="button">设置恢复码</button>
+    <button class="sheet-item" id="sheet-theme" type="button">切换深色 / 浅色</button>
+    <button class="sheet-item" id="sheet-about" type="button">关于</button>
+    <button class="sheet-item cancel" id="sheet-cancel" type="button">取消</button>
+  </div>
 </div>
 
 <!-- 新增 / 编辑弹层 -->

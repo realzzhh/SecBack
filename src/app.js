@@ -1080,3 +1080,48 @@ $("recnew-cancel").addEventListener("click", () => {
   vv.addEventListener("scroll", apply);
   apply();
 })();
+
+// ---------------------------------------------------------------- 底部操作栏
+//
+// Android 上没有菜单栏（tauri::menu 在移动端不存在），桌面靠菜单承载的
+// 功能必须有界面入口。底栏只出现在窄屏（CSS 控制），桌面仍是原生菜单。
+//
+// 注意没放「退出程序」：Android 的应用不该有退出按钮，系统会自己管进程，
+// 用户按返回键退出即可。硬加一个只会让人觉得别扭。
+
+$("tab-new").addEventListener("click", () => openEditor(null));
+$("tab-import").addEventListener("click", () => send({ t: "import" }));
+$("tab-lock").addEventListener("click", () => send({ t: "lock" }));
+$("tab-more").addEventListener("click", () => {
+  $("sheet").hidden = false;
+});
+
+const closeSheet = () => { $("sheet").hidden = true; };
+
+$("sheet-cancel").addEventListener("click", closeSheet);
+
+$("sheet-changePwd").addEventListener("click", () => {
+  closeSheet();
+  openChangePwd();
+});
+
+$("sheet-recovery").addEventListener("click", () => {
+  closeSheet();
+  openSetRecovery();
+});
+
+$("sheet-theme").addEventListener("click", () => {
+  closeSheet();
+  const now = document.documentElement.dataset.theme;
+  applyTheme(now === "dark" ? "light" : "dark");
+});
+
+$("sheet-about").addEventListener("click", () => {
+  closeSheet();
+  send({ t: "about" });
+});
+
+// 点遮罩空白处关掉抽屉
+$("sheet").addEventListener("click", e => {
+  if (e.target === $("sheet")) closeSheet();
+});

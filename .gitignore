@@ -62,3 +62,6 @@ src-tauri/gen/android/.gradle/
 src-tauri/gen/android/build/
 src-tauri/gen/android/app/build/
 src-tauri/gen/android/buildSrc/build/
+
+# 发布签名证书：含私钥和密码，绝不能入库
+/keystore/

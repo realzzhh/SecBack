@@ -15,6 +15,18 @@ val tauriProperties = Properties().apply {
 }
 
 android {
+    // release 包必须签名才能装到手机上。这里指向项目根目录 keystore/ 下那一个，
+    // 换成别的证书会导致「已安装的旧版无法覆盖升级」，所以别随便换。
+    // 证书和密码都在 .gitignore 里，不入库。
+    signingConfigs {
+        create("release") {
+            storeFile = file("../../../../keystore/secback-release.keystore")
+            storePassword = "secback2026"
+            keyAlias = "secback"
+            keyPassword = "secback2026"
+        }
+    }
+
     compileSdk = 37
     namespace = "com.secback.vault"
     defaultConfig {
@@ -39,8 +51,15 @@ android {
             }
         }
         getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+            // 关掉 R8 混淆和资源压缩。
+            // Tauri 的 Java 桥靠 JNI 反射找类名，混淆后很容易变成「一启动就闪退」，
+            // 而这种崩溃没有可读堆栈、极难定位。省下的那点体积（大头是 .so）
+            // 不值得拿稳定性换。等有稳定的测试链路再考虑打开。
+            isMinifyEnabled = false
+            isShrinkResources = false
             optimization {
-               enable = true
+               enable = false
             }
             proguardFiles(
                 *fileTree(".") {
