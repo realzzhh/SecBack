@@ -1,6 +1,17 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.secback" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- 退出 Android 15 起的强制 edge-to-edge。
+             不退出的话，即使 MainActivity 不调 enableEdgeToEdge()，
+             系统也会把 WebView 铺到状态栏和导航栏底下，
+             结果就是状态栏被内容遮挡、100vh 比实际可视区大一截。
+
+             tools:targetApi 只是消掉旧版本 SDK 的编译警告，
+             这个属性在 API 35 以下会被忽略，不影响老设备。 -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
+        <!-- 状态栏 / 导航栏颜色跟界面背景一致，否则会显示成系统默认的紫色，
+             跟这个暗色界面放在一起很突兀。色值对应 style.css 里的背景色。 -->
+        <item name="android:statusBarColor" tools:targetApi="21">#f5f6f8</item>
+        <item name="android:navigationBarColor" tools:targetApi="21">#f5f6f8</item>
     </style>
 </resources>

@@ -483,18 +483,30 @@ $("list").addEventListener("click", e => {
     // 从详情按返回回到列表后，再点同一个项目要能重新进去。
     // 不处理的话这里会直接 return，界面看起来"点了没反应"。
     document.body.classList.add("showing-detail");
+    history.pushState({ layer: "detail" }, "");
     return;
   }
   S.selected = id;
   secrets = {};
   send({ t: "select", id });
   render();
+
+  // 进详情页记一条历史，这样安卓返回键 / 侧滑手势能回到列表
+  if (document.body.classList.contains("showing-detail")) {
+    history.pushState({ layer: "detail" }, "");
+  }
 });
 
 // 窄屏才可见的返回按钮：退回列表，但不清选中——
 // 这样再点同一个项目还能进来。
 $("pane-back").addEventListener("click", () => {
-  document.body.classList.remove("showing-detail");
+  // 走 history.back() 而不是直接改 class，这样返回键和这个按钮是同一条路径，
+  // 不会出现"点按钮关不掉栈里的记录"导致返回键要按两次。
+  if (history.state?.layer === "detail") {
+    history.back();
+  } else {
+    document.body.classList.remove("showing-detail");
+  }
 });
 
 // ------------------------------------------------------------------ 详情交互
@@ -1124,4 +1136,51 @@ $("sheet-about").addEventListener("click", () => {
 // 点遮罩空白处关掉抽屉
 $("sheet").addEventListener("click", e => {
   if (e.target === $("sheet")) closeSheet();
+});
+
+// ---------------------------------------------------------------- 安卓返回键 / 侧滑返回
+//
+// WebView 里没有"返回键"事件，但安卓的返回键和从屏幕左缘右滑的手势，
+// 最终都会让 WebView 走 history.back()。
+// 所以只要打开任何一层（详情 / 弹层 / 抽屉）时往 history 压一条记录，
+// 返回键就会逐层关掉，而不是直接把 App 退掉。
+
+const overlayEls = [...document.querySelectorAll(".overlay")];
+
+// 最上面那一层（同一时刻只会开一个，随便取第一个可见的就行）
+const topLayer = () => overlayEls.find(el => !el.hidden) || null;
+
+// 用 MutationObserver 监听 hidden 变化，省得去改十几处 hidden=false / true。
+// 只要某个 overlay 从隐藏变可见，就压一条历史。
+const layerObserver = new MutationObserver(recs => {
+  for (const r of recs) {
+    const el = r.target;
+    if (!el.classList.contains("overlay")) continue;
+
+    if (!el.hidden) {
+      // 打开：压栈
+      if (history.state?.layer !== el.id) history.pushState({ layer: el.id }, "");
+    } else if (history.state?.layer === el.id) {
+      // 用按钮关掉的：栈顶还是自己，就退一条，保持栈和界面一致
+      // （如果是被返回键关掉的，栈已经退了，这里条件不成立，不会重复退）
+      history.back();
+    }
+  }
+});
+
+overlayEls.forEach(el =>
+  layerObserver.observe(el, { attributes: true, attributeFilter: ["hidden"] })
+);
+
+window.addEventListener("popstate", () => {
+  // 返回键 / 侧滑：先关最上面那一层
+  const top = topLayer();
+  if (top) {
+    top.hidden = true;   // 栈已经退过了，这里只同步界面，不再退栈
+    return;
+  }
+  // 再往上就是详情页 → 回列表
+  if (document.body.classList.contains("showing-detail")) {
+    document.body.classList.remove("showing-detail");
+  }
 });

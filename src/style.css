@@ -1486,3 +1486,44 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
 }
+
+/* 空状态提示里"底部/右上角"要按屏幕切换：手机是底部操作栏，桌面才是右上角 */
+.only-mobile { display: none; }
+
+@media (max-width: 700px) {
+  .only-mobile { display: inline; }
+  .only-desktop { display: none; }
+}
+
+/* 窄屏弹层：整体滚动，而不是只有内容区滚。
+   原因：弹层高度 = 可视区高度，但软键盘会盖住下半截，
+   光让 .modal-body 滚动的话，内容不溢出时根本滑不动，
+   用户永远看不到被键盘挡住的底部按钮。
+   改成整个 .modal 滚，滑到最下面就能看到「保存」。
+   （P10 实机反馈：按非输入框位置能上下拖） */
+@media (max-width: 700px) {
+  .modal,
+  .modal.narrow {
+    display: block;      /* 放弃 flex 布局，改回普通文档流 */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* 内容区不再单独滚动，交给外层 */
+  .modal-body {
+    flex: none;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  /* 头尾跟着内容走，不再固定——固定的话按钮会停在键盘底下 */
+  .modal-head {
+    position: static;
+  }
+
+  .modal-foot {
+    position: static;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+}

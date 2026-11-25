@@ -72,7 +72,11 @@
       <div class="list" id="list"></div>
       <div class="empty" id="list-empty" hidden>
         <div class="empty-title">还没有项目</div>
-        <div class="empty-sub">点右上角「新增」建第一个</div>
+        <!-- 手机上是底部操作栏，桌面才是右上角的工具栏按钮。
+             用 span 分开写，窄屏/宽屏各显示一半，免得两边的用户都指错方向。 -->
+        <div class="empty-sub">
+          点<span class="only-mobile">底部</span><span class="only-desktop">右上角</span>「新增」建第一个
+        </div>
       </div>
       <footer class="count" id="count"></footer>
     </aside>
