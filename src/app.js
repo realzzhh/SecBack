@@ -476,6 +476,10 @@ onHost(raw => {
 // ------------------------------------------------------------------ 列表交互
 
 $("list").addEventListener("click", e => {
+  // 刚拖完会紧跟着来一次 click（touch 序列结束后系统补发的），
+  // 不挡住的话拖完项目就直接跳进详情页了。
+  if (document.body.dataset.justDragged === "1") return;
+
   const item = e.target.closest(".item");
   if (!item) return;
   const id = item.dataset.id;
@@ -1184,3 +1188,138 @@ window.addEventListener("popstate", () => {
     document.body.classList.remove("showing-detail");
   }
 });
+
+// ---------------------------------------------------------------- 长按拖动排序
+//
+// 手机上把上移/下移按钮隐藏了，排序只能靠拖：
+//   按住 1 秒 → 项目浮起 → 上下拖 → 松手落定
+//
+// 实现要点：
+//   · 事件绑在 #list 上做委托，因为 renderList() 每次会重建所有 .item
+//   · 长按计时器在 touchmove 里清掉——用户只是想滚列表时不能误触发拖拽
+//   · 拖拽中才 preventDefault，否则正常滚动会被吃掉
+//   · 松手发一条 reorder（带目标下标），宿主一次落盘，不用逐条发 up/down
+
+(function setupDragSort() {
+  const list = $("list");
+
+  let pressTimer = null;
+  let dragEl = null;        // 正在拖的那一项
+  let items = [];           // 拖拽开始时的所有项（DOM 顺序）
+  let fromIndex = 0;        // 起始下标
+  let curIndex = 0;         // 当前落点下标
+  let startY = 0;
+  let stepH = 0;            // 相邻两项的间距（含 gap），用来换算拖了几格
+
+  const clearPress = () => {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  };
+
+  const resetDrag = () => {
+    if (dragEl) {
+      dragEl.classList.remove("dragging");
+      dragEl.style.transform = "";
+    }
+    items.forEach(el => { el.style.transform = ""; el.classList.remove("shifting"); });
+    dragEl = null;
+    items = [];
+    fromIndex = curIndex = 0;
+    list.classList.remove("sorting");
+  };
+
+  list.addEventListener("touchstart", ev => {
+    if (ev.touches.length > 1) return;         // 双指操作（缩放之类）不掺和
+    const item = ev.target.closest(".item");
+    if (!item) return;
+
+    startY = ev.touches[0].clientY;
+
+    pressTimer = setTimeout(() => {
+      dragEl = item;
+      items = [...list.querySelectorAll(".item")];
+      fromIndex = curIndex = items.indexOf(item);
+
+      // 相邻两项 top 之差就是"一格"的高度，比拿 offsetHeight 准（含 gap）
+      if (items.length > 1) {
+        const a = items[0].getBoundingClientRect();
+        const b = items[1].getBoundingClientRect();
+        stepH = b.top - a.top;
+      } else {
+        stepH = item.getBoundingClientRect().height;
+      }
+
+      dragEl.classList.add("dragging");
+      list.classList.add("sorting");
+
+      // 标记"这次是拖拽"，让随后的 click 不作数（在 touchmove 里 reset 之前先置位）
+      document.body.dataset.justDragged = "1";
+
+      // 轻微震动，让用户知道"拿起来了"
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, 1000);
+  }, { passive: true });
+
+  list.addEventListener("touchmove", ev => {
+    // 只要手指动了就取消长按计时（除非已经在拖）
+    if (!dragEl) {
+      clearPress();
+      return;
+    }
+
+    // 拖动中要吃掉默认行为，否则页面会跟着滚
+    ev.preventDefault();
+
+    const dy = ev.touches[0].clientY - startY;
+    dragEl.style.transform = `translateY(${dy}px)`;
+
+    // 换算成"跨了几格"，并让中间的项目让位
+    const steps = Math.round(dy / stepH);
+    const target = Math.max(0, Math.min(items.length - 1, fromIndex + steps));
+    if (target === curIndex) return;
+
+    items.forEach((el, i) => {
+      if (el === dragEl) return;
+      let shift = 0;
+      if (curIndex < target && i > curIndex && i <= target) shift = -stepH;
+      else if (curIndex > target && i >= target && i < curIndex) shift = stepH;
+
+      if (shift) {
+        el.style.transform = `translateY(${shift}px)`;
+        el.classList.add("shifting");
+      } else {
+        el.style.transform = "";
+        el.classList.remove("shifting");
+      }
+    });
+
+    curIndex = target;
+  }, { passive: false });
+
+  const finish = () => {
+    clearPress();
+    if (!dragEl) return;
+
+    // 取值必须在 resetDrag 之前——它会把 fromIndex / curIndex 一起清零，
+    // 之前就是踩了这个坑：send 放在 reset 之后，to 永远是 0，等于原地不动。
+    const id = dragEl.dataset.id;
+    const toIndex = curIndex;
+    const moved = toIndex !== fromIndex;
+
+    // 先清掉视觉状态，再请求重排（renderList 会重建 DOM，不清会残留）
+    resetDrag();
+
+    if (moved) {
+      send({ t: "reorder", id, to: toIndex });
+    }
+
+    // 拖拽结束后系统补发的那次 click 一般在几十毫秒内到达，
+    // 留 350ms 再放开，够挡掉它又不影响用户下一次正常点击。
+    setTimeout(() => { delete document.body.dataset.justDragged; }, 350);
+  };
+
+  list.addEventListener("touchend", finish);
+  list.addEventListener("touchcancel", finish);
+})();

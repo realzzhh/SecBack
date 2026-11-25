@@ -1527,3 +1527,73 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     padding-bottom: calc(20px + env(safe-area-inset-bottom));
   }
 }
+
+/* ============================================================
+   长按拖动排序（2026-11-25）
+   ------------------------------------------------------------
+   按住 1 秒项目"拿起来"，上下拖动时其他项让位，松手落定。
+   手机上把上移/下移按钮隐藏了，排序只能靠这个。
+   ============================================================ */
+
+/* 默认给个过渡，让位动画才顺滑；拖动中的元素单独关掉过渡（要跟手） */
+.item {
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+
+.item.dragging {
+  position: relative;
+  z-index: 10;
+  /* 跟手的时候不能有过渡，否则手指走了元素才慢慢追上来 */
+  transition: none;
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, .75);
+  /* 描一圈边表示"拿起来了" */
+  outline: 2px solid var(--accent, #4a9eff);
+  outline-offset: -2px;
+  opacity: .96;
+}
+
+/* 让位中的项走过渡，看起来是"滑开"而不是"跳开" */
+.item.shifting {
+  transition: transform .16s ease;
+}
+
+/* 拖动期间禁掉列表自身的惯性滚动，避免和拖动打架 */
+.list.sorting {
+  touch-action: none;
+  overflow: hidden;
+}
+
+/* ============================================================
+   长按拖动排序（2026-11-25）
+   ------------------------------------------------------------
+   按住 1 秒项目"拿起来"，上下拖动时其他项让位，松手落定。
+   手机上把上移/下移按钮隐藏了，排序只能靠这个。
+   ============================================================ */
+
+/* 默认给个过渡，让位动画才顺滑；拖动中的元素单独关掉过渡（要跟手） */
+.item {
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+
+.item.dragging {
+  position: relative;
+  z-index: 10;
+  /* 跟手的时候不能有过渡，否则手指走了元素才慢慢追上来 */
+  transition: none;
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, .75);
+  /* 描一圈边表示"拿起来了" */
+  outline: 2px solid var(--accent, #4a9eff);
+  outline-offset: -2px;
+  opacity: .96;
+}
+
+/* 让位中的项走过渡，看起来是"滑开"而不是"跳开" */
+.item.shifting {
+  transition: transform .16s ease;
+}
+
+/* 拖动期间禁掉列表自身的惯性滚动，避免和拖动打架 */
+.list.sorting {
+  touch-action: none;
+  overflow: hidden;
+}

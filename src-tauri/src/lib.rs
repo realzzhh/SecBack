@@ -786,6 +786,20 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
             }
         }
 
+        "reorder" => {
+            // 拖拽排序专用：直接把项目挪到目标下标，一次落盘。
+            // 不用逐条发 up/down——拖过十几项会触发十几次渲染和写盘，卡得很明显。
+            let id = msg["id"].as_str().unwrap_or("");
+            let to = msg["to"].as_u64().unwrap_or(0) as usize;
+            let mut store = lock!(st.store);
+            if let Some(idx) = parse_hex(id).and_then(|h| store.find_index(&h)) {
+                if to < store.projects().len() && idx != to {
+                    store.move_item(idx, to);
+                    persist(app, st, &mut store, "");
+                }
+            }
+        }
+
         "delete" => {
             let sel = lock!(st.selected).clone();
             let mut store = lock!(st.store);
