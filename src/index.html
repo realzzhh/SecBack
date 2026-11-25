@@ -23,8 +23,9 @@
     <h1 class="login-title">SecBack</h1>
     <p class="login-sub">本地密码本</p>
 
-    <!-- inputmode="numeric"：手机上点进来直接弹数字键盘（主密码是数字），
-         省得先在全键盘里找数字。保留 type="password" 让输入内容显示成圆点。 -->
+    <!-- inputmode="numeric"：点进来直接弹数字键盘（主密码是数字）。
+         之前以为它导致黑屏，其实那是 MIUI 对密码框的截屏保护——
+         App 一直是好的，只是截出来的图是黑的。 -->
     <input id="login-pwd" class="login-input" type="password" inputmode="numeric"
            placeholder="主密码" autocomplete="off" spellcheck="false">
     <button id="login-go" class="login-btn">进 入</button>
@@ -98,15 +99,18 @@
             <h1 id="p-name"></h1>
             <p id="p-remark" class="p-remark"></p>
           </div>
-          <div class="pane-actions">
-            <button class="btn ghost" id="btn-edit">编辑</button>
-            <button class="btn danger-ghost" id="btn-delete">删除</button>
-          </div>
         </div>
 
         <div class="slots" id="slots"></div>
 
         <div class="meta" id="p-meta"></div>
+
+        <!-- 编辑/删除挪到详情页最底部（P10 反馈：放头上不顺手）。
+             手机上「删除」在左占 1/4，「编辑」在右占 3/4。 -->
+        <div class="pane-actions">
+          <button class="btn danger-ghost" id="btn-delete">删除</button>
+          <button class="btn ghost" id="btn-edit">编辑</button>
+        </div>
       </div>
     </main>
   </div>
@@ -158,6 +162,13 @@
       </button>
     </div>
 
+    <!-- 保存/取消放在标题下面：底部会被软键盘挡住，还得滑一下才点得到。
+         顺序是「保存 左、取消 右」，各占一半宽度。 -->
+    <div class="modal-foot">
+      <button class="btn primary" id="modal-save">保存</button>
+      <button class="btn ghost" id="modal-cancel">取消</button>
+    </div>
+
     <div class="modal-body">
       <label class="field">
         <span>项目名称</span>
@@ -169,11 +180,6 @@
       </label>
 
       <div class="slots-edit" id="m-slots"></div>
-    </div>
-
-    <div class="modal-foot">
-      <button class="btn ghost" id="modal-cancel">取消</button>
-      <button class="btn primary" id="modal-save">保存</button>
     </div>
   </div>
 </div>

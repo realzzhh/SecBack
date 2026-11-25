@@ -1605,3 +1605,82 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   overflow-wrap: break-word;
   word-break: normal;
 }
+
+/* ============================================================
+   按 K90 真机反馈调整（2026-11-25）
+   ============================================================ */
+
+/* ---- 1) 按钮按下时的"矩形高亮" ----
+   WebView 默认的 -webkit-tap-highlight-color 是个方框，不受 border-radius
+   影响，所以按下时看起来"没圆角了"。关掉它，改用自己的按下态。 */
+.btn,
+.icon-btn,
+.tool,
+.tab,
+.pane-back,
+.sheet-item {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:active { opacity: .82; }
+
+/* ---- 2) 详情页的编辑/删除：挪到底部，吸底 ----
+   桌面在内容流末尾右对齐；手机铺满，删除 1/4 + 编辑 3/4。 */
+.pane-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 16px 0 4px;
+}
+
+@media (max-width: 700px) {
+  .pane-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    justify-content: stretch;
+    /* 抵消 .pane 的左右内边距，让按钮贴到屏幕两边 */
+    margin: 0 -14px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+  }
+
+  .pane-actions #btn-delete { flex: 1; }   /* 四分之一 */
+  .pane-actions #btn-edit   { flex: 3; }   /* 四分之三 */
+
+  .pane-actions .btn {
+    min-height: 48px;
+    font-size: 15px;
+  }
+}
+
+/* ---- 3) 编辑弹层的保存/取消：各占一半 ---- */
+@media (max-width: 700px) {
+  #overlay .modal-foot {
+    display: flex;
+    gap: 8px;
+    padding: 6px 14px 14px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  #overlay .modal-foot .btn {
+    flex: 1;
+    min-height: 46px;
+    font-size: 15px;
+  }
+}
+
+/* ---- 4) 通知条：从底部改到顶部左侧，从左边滑进来 ---- */
+.toasts {
+  left: 16px;
+  top: 16px;
+  right: auto;
+  bottom: auto;
+  align-items: flex-start;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-24px); }
+  to   { opacity: 1; transform: none; }
+}

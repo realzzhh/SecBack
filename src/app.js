@@ -38,7 +38,12 @@ let S = {
 };
 
 let query = "";
-let secrets = {};          // "id:slot" -> 明文密码（详情页"显示"用，临时）
+let secrets = {};
+
+// 是否"真的要显示详情"。
+// 不能只看 S.selected 有没有值——拖拽排序后 renderList 会重建、
+// renderDetail 看到 selected 还在就把详情又显示出来了（K90 上就是这个 bug）。
+let wantDetail = false;          // "id:slot" -> 明文密码（详情页"显示"用，临时）
 let editingId = null;      // null 表示新增
 let impData = null;        // 导入预览的临时状态
 
@@ -199,8 +204,18 @@ function renderDetail() {
   $("placeholder").hidden = !!p;
   $("pane").hidden = !p;
 
-  // 窄屏下选中项目就切到详情视图。桌面没有这个类的样式，加了也无副作用。
-  document.body.classList.toggle("showing-detail", !!p);
+  // 窄屏下切到详情视图。必须是"确实想看详情"才切：
+  // 只看 p 有没有值的话，拖拽排序触发的重渲染会把详情又翻出来。
+  const showDetail = !!p && wantDetail;
+  document.body.classList.toggle("showing-detail", showDetail);
+
+  // 只要详情显示出来了，历史栈顶就必须是 detail——
+  // 否则安卓返回键会认为"没有可返回的"，直接把 App 退掉。
+  // 典型场景：登录后延续上次的选中状态直接进详情，这条路没经过列表点击，
+  // 之前就漏了 pushState，导致一按返回就退出。
+  if (showDetail && history.state?.layer !== "detail") {
+    history.pushState({ layer: "detail" }, "");
+  }
 
   if (!p) return;
 
@@ -477,22 +492,18 @@ onHost(raw => {
 
 // ------------------------------------------------------------------ 列表交互
 
-$("list").addEventListener("click", e => {
-  // 刚拖完会紧跟着来一次 click（touch 序列结束后系统补发的），
-  // 不挡住的话拖完项目就直接跳进详情页了。
-  if (document.body.dataset.justDragged === "1") return;
-
-  const item = e.target.closest(".item");
-  if (!item) return;
-  const id = item.dataset.id;
+// 选中某个项目并进入详情。
+// 抽成函数是因为入口有两个：桌面用 click，触摸屏用 touchend（见 setupDragSort）。
+function selectProject(id) {
   if (id === S.selected) {
     // 从详情按返回回到列表后，再点同一个项目要能重新进去。
-    // 不处理的话这里会直接 return，界面看起来"点了没反应"。
+    wantDetail = true;
     document.body.classList.add("showing-detail");
     history.pushState({ layer: "detail" }, "");
     return;
   }
   S.selected = id;
+  wantDetail = true;
   secrets = {};
   send({ t: "select", id });
   render();
@@ -501,6 +512,16 @@ $("list").addEventListener("click", e => {
   if (document.body.classList.contains("showing-detail")) {
     history.pushState({ layer: "detail" }, "");
   }
+}
+
+$("list").addEventListener("click", e => {
+  // 触摸设备上点击由 touchend 负责（见 setupDragSort 里的 finish）。
+  // 这里只服务桌面鼠标：最近 800ms 内有 touchend 就说明是手机，跳过。
+  if (Date.now() - Number(document.body.dataset.lastTouch || 0) < 800) return;
+
+  const item = e.target.closest(".item");
+  if (!item) return;
+  selectProject(item.dataset.id);
 });
 
 // 窄屏才可见的返回按钮：退回列表，但不清选中——
@@ -1187,6 +1208,7 @@ function handleBack() {
   }
   if (document.body.classList.contains("showing-detail")) {
     document.body.classList.remove("showing-detail");
+    wantDetail = false;
     return true;
   }
   return false;
@@ -1235,7 +1257,8 @@ if (window.__TAURI__?.event?.listen) {
   let fromIndex = 0;        // 起始下标
   let curIndex = 0;         // 当前落点下标
   let startY = 0;
-  let stepH = 0;            // 相邻两项的间距（含 gap），用来换算拖了几格
+  let stepH = 0;
+  let touchMoved = false;   // 手指是否移动过（超过 8px 阈值）            // 相邻两项的间距（含 gap），用来换算拖了几格
 
   const clearPress = () => {
     if (pressTimer) {
@@ -1267,6 +1290,7 @@ if (window.__TAURI__?.event?.listen) {
     delete document.body.dataset.justDragged;
 
     startY = ev.touches[0].clientY;
+    touchMoved = false;
 
     pressTimer = setTimeout(() => {
       dragEl = item;
@@ -1296,6 +1320,9 @@ if (window.__TAURI__?.event?.listen) {
   list.addEventListener("touchmove", ev => {
     // 只要手指动了就取消长按计时（除非已经在拖）
     if (!dragEl) {
+      // 还没进拖拽：记下手指有没有明显移动。
+      // 移动过就是"在滚列表"，既不该触发长按，也不算点击。
+      if (Math.abs(ev.touches[0].clientY - startY) > 8) touchMoved = true;
       clearPress();
       return;
     }
@@ -1329,9 +1356,20 @@ if (window.__TAURI__?.event?.listen) {
     curIndex = target;
   }, { passive: false });
 
-  const finish = () => {
+  const finish = (ev) => {
     clearPress();
-    if (!dragEl) return;
+    document.body.dataset.lastTouch = String(Date.now());
+
+    // 没进入拖拽、手指也没移动 → 这一次是点击，自己处理。
+    // 不再等浏览器在 touchend 后补发的 click：那个时机完全不可控，
+    // K90 上用标志位、时间戳、pointer-events 三种办法都挡不住。
+    if (!dragEl) {
+      if (!touchMoved && ev && ev.target) {
+        const item = ev.target.closest(".item");
+        if (item) selectProject(item.dataset.id);
+      }
+      return;
+    }
 
     // 取值必须在 resetDrag 之前——它会把 fromIndex / curIndex 一起清零，
     // 之前就是踩了这个坑：send 放在 reset 之后，to 永远是 0，等于原地不动。
@@ -1346,7 +1384,12 @@ if (window.__TAURI__?.event?.listen) {
       send({ t: "reorder", id, to: toIndex });
     }
 
-    // 标志的清除放在下一次 touchstart 里（见上），不用定时器。
+    // 拖拽结束后系统补发的那次 click 还是会漏过来（K90 上实测）。
+    // 不再靠标志位猜时机，直接让列表在 400ms 内不接收指针事件——
+    // click 压根不会派发，比"收到再丢弃"更彻底。
+    list.style.pointerEvents = "none";
+    setTimeout(() => { list.style.pointerEvents = ""; }, 400);
+
   };
 
   list.addEventListener("touchend", finish);
