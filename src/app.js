@@ -80,7 +80,9 @@ function showLogin(hint, kind) {
   $("login-pwd").value = "";
   $("login-go").disabled = false;
   setHint(hint || "", kind);
-  setTimeout(() => $("login-pwd").focus(), 30);
+  // 这里**不再**自动 focus。
+  // 自动聚焦会让系统键盘在进 App 的瞬间就弹出来，挡住半屏，
+  // 而且用户还没打算输入。改成用户点输入框时再弹（浏览器原生行为）。
 }
 
 function showMain() {
@@ -322,7 +324,7 @@ onHost(raw => {
       }
       // 首次运行要把密库位置写出来——这个程序最容易出的事就是"密库到底在哪儿"
       const hint = m.firstRun
-        ? "没有找到密库，将新建一份空的。\n位置：" + m.vaultPath
+        ? "没有找到密库，将新建一份空的。\n位置：\n" + m.vaultPath
         : "";
       showLogin(hint);
       return;
@@ -1176,18 +1178,42 @@ overlayEls.forEach(el =>
   layerObserver.observe(el, { attributes: true, attributeFilter: ["hidden"] })
 );
 
-window.addEventListener("popstate", () => {
-  // 返回键 / 侧滑：先关最上面那一层
+// 返回一层。返回 true 表示这次返回被我们消费掉了。
+function handleBack() {
   const top = topLayer();
   if (top) {
     top.hidden = true;   // 栈已经退过了，这里只同步界面，不再退栈
-    return;
+    return true;
   }
-  // 再往上就是详情页 → 回列表
   if (document.body.classList.contains("showing-detail")) {
     document.body.classList.remove("showing-detail");
+    return true;
   }
+  return false;
+}
+
+window.addEventListener("popstate", () => {
+  handleBack();
 });
+
+// 安卓实体/虚拟返回键。
+//
+// Tauri 的 AppPlugin 逻辑是：如果有人监听 "back-button" 事件，就只发事件，
+// 不再自己 goBack 或退出；没人监听时才看 webView.canGoBack()。
+//
+// 之前返回键直接退出 App，就是因为没注册监听，而 canGoBack() 那一刻是 false。
+// 注册之后由我们完全接管：先逐层关，真退无可退才让 App 退出。
+if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("back-button", async () => {
+    if (handleBack()) return;
+    // 退无可退，才真的退出
+    try {
+      await window.__TAURI__.core.invoke("plugin:app|exit");
+    } catch (_) {
+      // 没有该权限就什么都不做，总比把用户扔回桌面上强
+    }
+  });
+}
 
 // ---------------------------------------------------------------- 长按拖动排序
 //
@@ -1234,6 +1260,11 @@ window.addEventListener("popstate", () => {
     if (ev.touches.length > 1) return;         // 双指操作（缩放之类）不掺和
     const item = ev.target.closest(".item");
     if (!item) return;
+
+    // 拖拽后的那次 click 要挡掉，但用"下次触摸开始时清除"而不是定时器：
+    // 安卓的 click 延迟不稳定，定时器可能会在 click 之前就失效
+    // （P10 上就出现了"拖完松手直接跳进详情页"）。
+    delete document.body.dataset.justDragged;
 
     startY = ev.touches[0].clientY;
 
@@ -1315,9 +1346,7 @@ window.addEventListener("popstate", () => {
       send({ t: "reorder", id, to: toIndex });
     }
 
-    // 拖拽结束后系统补发的那次 click 一般在几十毫秒内到达，
-    // 留 350ms 再放开，够挡掉它又不影响用户下一次正常点击。
-    setTimeout(() => { delete document.body.dataset.justDragged; }, 350);
+    // 标志的清除放在下一次 touchstart 里（见上），不用定时器。
   };
 
   list.addEventListener("touchend", finish);

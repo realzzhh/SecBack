@@ -1597,3 +1597,11 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   touch-action: none;
   overflow: hidden;
 }
+
+/* 提示里的路径太长，allow 任意断行的同时别把中文词拆开。
+   之前用 overflow-wrap:anywhere 会把"位置"拆成"位 / 置"两行，
+   非常难看。改成 break-word：只在整行放不下时才断，中文词优先保持完整。 */
+.login-hint {
+  overflow-wrap: break-word;
+  word-break: normal;
+}

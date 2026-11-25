@@ -23,7 +23,9 @@
     <h1 class="login-title">SecBack</h1>
     <p class="login-sub">本地密码本</p>
 
-    <input id="login-pwd" class="login-input" type="password"
+    <!-- inputmode="numeric"：手机上点进来直接弹数字键盘（主密码是数字），
+         省得先在全键盘里找数字。保留 type="password" 让输入内容显示成圆点。 -->
+    <input id="login-pwd" class="login-input" type="password" inputmode="numeric"
            placeholder="主密码" autocomplete="off" spellcheck="false">
     <button id="login-go" class="login-btn">进 入</button>
 

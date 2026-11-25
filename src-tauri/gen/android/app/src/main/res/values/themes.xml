@@ -9,9 +9,18 @@
              tools:targetApi 只是消掉旧版本 SDK 的编译警告，
              这个属性在 API 35 以下会被忽略，不影响老设备。 -->
         <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
-        <!-- 状态栏 / 导航栏颜色跟界面背景一致，否则会显示成系统默认的紫色，
-             跟这个暗色界面放在一起很突兀。色值对应 style.css 里的背景色。 -->
-        <item name="android:statusBarColor" tools:targetApi="21">#f5f6f8</item>
-        <item name="android:navigationBarColor" tools:targetApi="21">#f5f6f8</item>
+        <!-- 统一用深色状态栏。
+             之前浅色主题设成 #f5f6f8（接近白），而图标默认也是浅色，
+             结果就是"一条白杠把时间和电量盖住"。
+             这个 App 默认就是深色界面，所以状态栏统一深色 + 浅色图标。 -->
+        <item name="android:statusBarColor" tools:targetApi="21">#14161a</item>
+        <item name="android:navigationBarColor" tools:targetApi="21">#14161a</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="23">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+        <!-- 窗口背景也设深色。
+             Material3 默认是白色，Android 15+ 强制 edge-to-edge 后，
+             状态栏那块留白露的就是这层窗口背景——
+             这正是"一条白杠把时间电量盖住"的来源。 -->
+        <item name="android:windowBackground">#14161a</item>
     </style>
 </resources>
