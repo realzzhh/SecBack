@@ -1338,11 +1338,23 @@ if (window.__TAURI__?.event?.listen) {
     const target = Math.max(0, Math.min(items.length - 1, fromIndex + steps));
     if (target === curIndex) return;
 
+    // 让位必须只看「起点 fromIndex」和「当前落点 target」，不能看 curIndex。
+    //
+    // 之前用 curIndex 做增量判断，分多次往下拖时会出问题：
+    //   第 1 步 target=1 → 第 2 项上移一格
+    //   第 2 步 target=2 → 第 2 项不再满足条件，transform 被清空回到原位，
+    //                      第 3 项此时才上移一格 → 两项重叠在同一个位置。
+    // 也就是用户看到的「222 和 333 重合」。
     items.forEach((el, i) => {
       if (el === dragEl) return;
       let shift = 0;
-      if (curIndex < target && i > curIndex && i <= target) shift = -stepH;
-      else if (curIndex > target && i >= target && i < curIndex) shift = stepH;
+      if (target > fromIndex) {
+        // 往下拖：起点和落点之间的都往上让一格
+        if (i > fromIndex && i <= target) shift = -stepH;
+      } else if (target < fromIndex) {
+        // 往上拖：落点和起点之间的都往下让一格
+        if (i >= target && i < fromIndex) shift = stepH;
+      }
 
       if (shift) {
         el.style.transform = `translateY(${shift}px)`;

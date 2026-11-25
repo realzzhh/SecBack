@@ -95,10 +95,13 @@
       <div class="pane" id="pane" hidden>
         <div class="pane-head">
           <button class="pane-back" id="pane-back" type="button" aria-label="返回列表">‹</button>
-          <div>
+          <div class="pane-title">
             <h1 id="p-name"></h1>
             <p id="p-remark" class="p-remark"></p>
           </div>
+          <!-- 右侧等宽占位：左边有 40px 的返回按钮，右边不留同宽的空白，
+               标题就会偏右，不是真正居中 -->
+          <span class="pane-head-gap" aria-hidden="true"></span>
         </div>
 
         <div class="slots" id="slots"></div>

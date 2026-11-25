@@ -26,7 +26,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 /// 复制到剪贴板后多久自动清空。密码不应该长期躺在剪贴板里。
-const CLIP_CLEAR_SECS: u64 = 30;
+const CLIP_CLEAR_SECS: u64 = 60;
 
 /// 连续错几次之后开始加冷却。
 const FAIL_FREE_TRIES: u32 = 5;
@@ -763,9 +763,9 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
                             app,
                             "ok",
                             if field == "user" {
-                                "账号已复制，30 秒后自动清除"
+                                "账号已复制，60 秒后自动清除"
                             } else {
-                                "密码已复制，30 秒后自动清除"
+                                "密码已复制，60 秒后自动清除"
                             },
                         );
                     }

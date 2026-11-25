@@ -1684,3 +1684,112 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   from { opacity: 0; transform: translateX(-24px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* ============================================================
+   详情页头部与底部按钮（K90 第三轮反馈）
+   ============================================================ */
+
+/* ---- 返回按钮做成独立圆形 ---- */
+.pane-back {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--line-soft, rgba(255, 255, 255, .07));
+  color: var(--text-2);
+  font-size: 24px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pane-back:hover { background: var(--line); color: var(--text); }
+.pane-back:active { opacity: .8; }
+
+/* ---- 标题居中：左右各留一个同宽的占位 ---- */
+.pane-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.pane-title h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  /* 名字太长就省略，别把返回按钮挤跑 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-title .p-remark {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-head-gap {
+  width: 40px;
+  flex: none;
+}
+
+@media (max-width: 700px) {
+  .pane-head {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  /* ---- 编辑/删除固定在屏幕最底部，不随内容滚动 ---- */
+  .pane-actions {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    margin: 0;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    justify-content: stretch;
+  }
+
+  /* 上底色：删除红、编辑蓝 */
+  .pane-actions #btn-delete {
+    flex: 1;
+    background: var(--danger);
+    border-color: transparent;
+    color: #fff;
+  }
+
+  .pane-actions #btn-edit {
+    flex: 3;
+    background: var(--accent);
+    border-color: transparent;
+    color: #fff;
+  }
+
+  .pane-actions .btn {
+    min-height: 48px;
+    font-size: 15px;
+    border-radius: 10px;
+  }
+
+  /* 固定底栏会盖住内容，给详情页留出空间 */
+  .pane {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---- 通知条再往下一点，别压住状态栏 ---- */
+.toasts {
+  top: 64px;
+}
