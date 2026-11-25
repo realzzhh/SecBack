@@ -22,8 +22,11 @@ use std::time::{Duration, Instant};
 use tauri::menu::{
     CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder,
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::{FsExt, OpenOptions};
+use std::io::{Read, Write};
+use zeroize::Zeroizing;
 
 /// 复制到剪贴板后多久自动清空。密码不应该长期躺在剪贴板里。
 const CLIP_CLEAR_SECS: u64 = 60;
@@ -55,6 +58,9 @@ type ThemeChecks = (CheckMenuItem<tauri::Wry>, CheckMenuItem<tauri::Wry>);
 type ThemeChecks = ();
 
 struct AppState {
+    action: Mutex<()>,
+    session: Mutex<u64>,
+    recovering: Mutex<bool>,
     store: Mutex<Store>,
     path: PathBuf,
     selected: Mutex<String>,
@@ -75,11 +81,16 @@ struct AppState {
     theme_checks: Mutex<Option<ThemeChecks>>,
 }
 
-/// 导入流程的中间状态。密码在这里短暂停留，导入结束或取消时立刻擦掉。
+/// 导入流程的中间状态；不保留解锁口令，临时项目在结束、取消或锁定时析构擦除。
 struct PendingImport {
     path: PathBuf,
-    pwd: String,
     incoming: Vec<Project>,
+}
+
+impl Drop for PendingImport {
+    fn drop(&mut self) {
+        self.incoming.clear();
+    }
 }
 
 /// 锁被 poison 也要能继续用：密码本不该因为一次 panic 就整个废掉。
@@ -198,9 +209,10 @@ fn refresh(app: &AppHandle, st: &AppState, store: &Store) {
 }
 
 /// 保存并刷新。写盘失败就只报错、不动界面。
-fn persist(app: &AppHandle, st: &AppState, store: &mut Store, ok_text: &str) -> bool {
-    match store.save(&st.path) {
+fn persist(app: &AppHandle, st: &AppState, store: &mut Store, candidate: Store, selected: String, ok_text: &str) -> bool {
+    match store.commit(&st.path, candidate) {
         Ok(()) => {
+            *lock!(st.selected) = selected;
             refresh(app, st, store);
             if !ok_text.is_empty() {
                 toast(app, "ok", ok_text);
@@ -248,6 +260,8 @@ fn apply_login(app: &AppHandle, st: &AppState, pwd: &str) {
 
     match store.load_or_create(&st.path, pwd, true) {
         Ok(_) => {
+            *lock!(st.session) += 1;
+            *lock!(st.recovering) = false;
             *lock!(st.fails) = 0;
             *lock!(st.using_default_pwd) = pwd == "1021";
 
@@ -278,10 +292,14 @@ fn apply_login(app: &AppHandle, st: &AppState, pwd: &str) {
 
 /// 锁定：抹掉内存里的密钥与模型，把界面切回登录页。
 fn do_lock(app: &AppHandle, st: &AppState) {
+    *lock!(st.session) += 1;
     {
         let mut store = lock!(st.store);
         store.clear_secure();
     }
+    *lock!(st.pending) = None;
+    *lock!(st.recovering) = false;
+    *lock!(st.using_default_pwd) = false;
     *lock!(st.selected) = String::new();
     *lock!(st.imported) = Vec::new();
     // 重置计时，否则刚锁完又被判定为闲置
@@ -306,6 +324,7 @@ fn spawn_idle_watchdog(handle: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(tick);
         let st = handle.state::<AppState>();
+        let _action = lock!(st.action);
         let expired = {
             let unlocked = lock!(st.store).is_unlocked();
             unlocked && lock!(st.last_activity).elapsed() >= idle_limit
@@ -349,7 +368,6 @@ fn start_import(app: &AppHandle, st: &AppState, path: PathBuf) {
         ProbeStatus::Ok => {
             *lock!(st.pending) = Some(PendingImport {
                 path: path.clone(),
-                pwd: String::new(),
                 incoming: Vec::new(),
             });
             push(
@@ -385,7 +403,6 @@ fn import_unlock(app: &AppHandle, st: &AppState, pwd: &str) {
                 return;
             }
             if let Some(p) = lock!(st.pending).as_mut() {
-                p.pwd = pwd.to_string();
                 p.incoming = incoming;
             }
             push_import_preview(app, st);
@@ -546,13 +563,7 @@ fn import_commit(app: &AppHandle, st: &AppState, msg: &Value) {
     }
     toast(app, "ok", &text);
 
-    // 现在才擦口令
-    let mut pwd = pending.pwd;
-    unsafe {
-        for b in pwd.as_bytes_mut() {
-            *b = 0;
-        }
-    }
+
 }
 
 // ---------------------------------------------------------------- 菜单
@@ -576,6 +587,7 @@ fn install_menu(app: &AppHandle, unlocked: bool) {
                 )
                 .separator()
                 .item(&MenuItemBuilder::with_id("import", "从另一台机器导入…").build(app)?)
+                .item(&MenuItemBuilder::with_id("export", "导出加密备份…").build(app)?)
                 .separator()
                 .item(&MenuItemBuilder::with_id("changePwd", "修改主密码…").build(app)?)
                 .item(&MenuItemBuilder::with_id("setRecovery", "设置恢复码…").build(app)?)
@@ -673,10 +685,70 @@ fn pick_and_import(app: AppHandle) {    app.dialog()
         .pick_file(move |picked| {
             if let Some(fp) = picked {
                 if let Ok(path) = fp.into_path() {
+                    tauri::async_runtime::spawn_blocking(move || {
                     let st = app.state::<AppState>();
+                    let _action = lock!(st.action);
                     start_import(&app, st.inner(), path);
+                    });
                 }
             }
+        });
+}
+
+/// 只复制已经成功落盘的密文，不把明文交给文件选择器。
+fn pick_and_export(app: AppHandle) {
+    let st = app.state::<AppState>();
+    if !lock!(st.store).is_unlocked() || *lock!(st.recovering) {
+        toast(&app, "err", "请先解锁再导出");
+        return;
+    }
+    // 锁定、重新登录后不再使用旧文件选择结果。
+    let opened = *lock!(st.session);
+    let handle = app.clone();
+    app.dialog().file().set_title("导出加密备份")
+        .set_file_name(format!("SecBack-备份-{}.properties", now_filetime()))
+        .add_filter("SecBack 加密备份", &["properties"])
+        .save_file(move |picked| {
+            let Some(fp) = picked else { return; };
+            // Android 文件描述符解析涉及主线程插件，放到工作线程。
+            std::thread::spawn(move || {
+                let st = handle.state::<AppState>();
+                let _action = lock!(st.action);
+                if !lock!(st.store).is_unlocked() || *lock!(st.recovering) || opened != *lock!(st.session) {
+                    toast(&handle, "err", "密库已锁定，请解锁后重新导出");
+                    return;
+                }
+                if let Ok(path) = fp.clone().into_path() {
+                    if std::fs::canonicalize(&path).ok() == std::fs::canonicalize(&st.path).ok() {
+                        toast(&handle, "err", "备份不能覆盖当前密库，请选择其他文件");
+                        return;
+                    }
+                }
+                let result = (|| -> Result<(), String> {
+                    let bytes = std::fs::read(&st.path).map_err(|e| e.to_string())?;
+                    let mut opts = OpenOptions::new();
+                    opts.write(true).create(true).truncate(true);
+                    let mut file = handle.fs().open(fp.clone(), opts).map_err(|e| e.to_string())?;
+                    file.write_all(&bytes).map_err(|e| e.to_string())?;
+                    file.flush().map_err(|e| e.to_string())?;
+                    file.sync_all().map_err(|e| e.to_string())?;
+                    drop(file);
+                    let mut read_opts = OpenOptions::new();
+                    read_opts.read(true);
+                    let mut readback = Vec::new();
+                    handle.fs().open(fp.clone(), read_opts).map_err(|e| e.to_string())?
+                        .take(bytes.len() as u64 + 1).read_to_end(&mut readback).map_err(|e| e.to_string())?;
+                    if bytes != readback { return Err("备份回读校验不一致".into()); }
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => {
+                        push(&handle, json!({"t":"exportResult", "destination":fp.to_string()}));
+                        toast(&handle, "ok", "加密备份已导出，回读校验通过");
+                    },
+                    Err(e) => toast(&handle, "err", &format!("导出失败，备份未确认有效：{}", e)),
+                }
+            });
         });
 }
 
@@ -685,6 +757,16 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
 
     // 只要前端还发消息，就说明有人在动
     *lock!(st.last_activity) = Instant::now();
+
+    let public = matches!(t, "ready" | "login" | "recover" | "recover_set_password" | "recover_cancel" | "theme_sync" | "about" | "lock" | "touch");
+    if (!public && (!lock!(st.store).is_unlocked() || *lock!(st.recovering)))
+        || (t == "recover_set_password" && !*lock!(st.recovering)) {
+        if matches!(t, "create" | "save") {
+            push(app, json!({"t":"saveResult", "request":msg["request"], "ok":false}));
+        }
+        toast(app, "err", "请先完成解锁");
+        return;
+    }
 
     match t {
         "ready" => {
@@ -714,7 +796,7 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
                 );
                 return;
             }
-            let pwd = msg["pwd"].as_str().unwrap_or("").to_string();
+            let pwd = Zeroizing::new(msg["pwd"].as_str().unwrap_or("").to_string());
             if !pwd.is_empty() {
                 apply_login(app, st, &pwd);
             }
@@ -741,6 +823,7 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
                             "t": "secret",
                             "id": id,
                             "slot": slot,
+                            "request": msg["request"],
                             "pass": store.projects()[idx].slots[slot].pass,
                         }),
                     );
@@ -780,8 +863,9 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
             if let Some(idx) = parse_hex(&sel).and_then(|h| store.find_index(&h)) {
                 let target = idx as i64 + dir;
                 if target >= 0 && (target as usize) < store.projects().len() {
-                    store.move_item(idx, target as usize);
-                    persist(app, st, &mut store, "");
+                    let mut candidate = store.staged();
+                    candidate.move_item(idx, target as usize);
+                    persist(app, st, &mut store, candidate, sel, "");
                 }
             }
         }
@@ -794,15 +878,18 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
             let mut store = lock!(st.store);
             if let Some(idx) = parse_hex(id).and_then(|h| store.find_index(&h)) {
                 if to < store.projects().len() && idx != to {
-                    store.move_item(idx, to);
-                    persist(app, st, &mut store, "");
+                    let mut candidate = store.staged();
+                    candidate.move_item(idx, to);
+                    let selected = lock!(st.selected).clone();
+                    persist(app, st, &mut store, candidate, selected, "");
                 }
             }
         }
 
         "delete" => {
-            let sel = lock!(st.selected).clone();
-            let mut store = lock!(st.store);
+            let sel = msg["id"].as_str().unwrap_or("").to_string();
+            let mut current = lock!(st.store);
+            let mut store = current.staged();
             if let Some(idx) = parse_hex(&sel).and_then(|h| store.find_index(&h)) {
                 store.projects_mut().remove(idx);
                 // 删完选下一个，没有就选上一个
@@ -812,17 +899,21 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
                 } else {
                     hex(&store.projects()[idx.min(n - 1)].id)
                 };
-                *lock!(st.selected) = next;
-                persist(app, st, &mut store, "已删除");
+                persist(app, st, &mut current, store, next, "已删除");
             }
         }
 
         "create" | "save" => {
             let is_new = t == "create";
-            let mut store = lock!(st.store);
+            let mut current = lock!(st.store);
+            let mut store = current.staged();
 
             let idx = if is_new {
-                let id = make_id().unwrap_or([0u8; 16]);
+                let Some(id) = make_id() else {
+                    push(app, json!({"t":"saveResult", "request":msg["request"], "ok":false}));
+                    toast(app,"err","无法生成项目标识，请重试");
+                    return;
+                };
                 store.projects_mut().push(Project::new_with_id(id));
                 store.projects().len() - 1
             } else {
@@ -830,7 +921,11 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
                     .and_then(|h| store.find_index(&h))
                 {
                     Some(i) => i,
-                    None => return,
+                    None => {
+                        push(app, json!({"t":"saveResult", "request":msg["request"], "ok":false}));
+                        toast(app,"err","项目已不存在，请重新打开编辑");
+                        return;
+                    },
                 }
             };
 
@@ -843,12 +938,14 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
                 p.remark = msg["remark"].as_str().unwrap_or("").to_string();
                 p.modified_utc = now_filetime();
 
+                let originals = p.slots.clone();
                 for i in 0..MAX_SLOTS {
                     let key = format!("s{}", i);
                     match msg.get(&key) {
                         Some(sj) => {
                             // pass 三态：缺省/null = 不动；"" = 清空；其他 = 替换
-                            let keep = p.slots[i].pass.clone();
+                            let source = sj["source"].as_u64().map(|n| n as usize).unwrap_or(i);
+                            let keep = originals.get(source).map(|s| s.pass.clone()).unwrap_or_default();
                             p.slots[i] = Account {
                                 user: sj["user"].as_str().unwrap_or("").to_string(),
                                 remark: sj["remark"].as_str().unwrap_or("").to_string(),
@@ -864,18 +961,21 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
                 hex(&p.id)
             };
 
-            *lock!(st.selected) = new_id;
-            persist(
+            let ok = persist(
                 app,
                 st,
-                &mut store,
+                &mut current,
+                store,
+                new_id,
                 if is_new { "已新增项目" } else { "已保存" },
             );
+            push(app, json!({"t":"saveResult", "request":msg["request"], "ok":ok}));
         }
 
         "lock" => do_lock(app, st),
 
         "import" => pick_and_import(app.clone()),
+        "export" => pick_and_export(app.clone()),
 
         // 拖放进来时前端直接把路径发过来（Tauri 的拖放事件在宿主侧，这里只是兜底）
         "import_path" => {
@@ -886,7 +986,7 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
         }
 
         "import_unlock" => {
-            let pwd = msg["pwd"].as_str().unwrap_or("").to_string();
+            let pwd = Zeroizing::new(msg["pwd"].as_str().unwrap_or("").to_string());
             if !pwd.is_empty() {
                 import_unlock(app, st, &pwd);
             }
@@ -899,8 +999,8 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
         }
 
         "rekey" => {
-            let old = msg["old"].as_str().unwrap_or("").to_string();
-            let new = msg["new"].as_str().unwrap_or("").to_string();
+            let old = Zeroizing::new(msg["old"].as_str().unwrap_or("").to_string());
+            let new = Zeroizing::new(msg["new"].as_str().unwrap_or("").to_string());
             if new.is_empty() {
                 toast(app, "err", "新密码不能为空");
                 return;
@@ -908,8 +1008,9 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
             let mut store = lock!(st.store);
             match store.rekey(&st.path, &old, &new) {
                 Ok(()) => {
-                    *lock!(st.using_default_pwd) = new == "1021";
+                    *lock!(st.using_default_pwd) = new.as_str() == "1021";
                     refresh(app, st, &store);
+                    push(app, json!({"t":"rekeyResult", "ok":true}));
                     toast(app, "ok", "主密码已更新，下次用新密码进入");
                 }
                 Err(e) => toast(app, "err", &format!("修改失败：{}", e.text())),
@@ -918,7 +1019,7 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
 
         // 设恢复码：验证当前口令 → 生成一组新码（首次会顺带把库升到 v2）
         "set_recovery" => {
-            let pwd = msg["pwd"].as_str().unwrap_or("").to_string();
+            let pwd = Zeroizing::new(msg["pwd"].as_str().unwrap_or("").to_string());
             let mut store = lock!(st.store);
             match store.enable_recovery(&st.path, &pwd) {
                 Ok(code) => {
@@ -932,10 +1033,11 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
         // 用恢复码解锁。成功后先不让人进去，必须设好新密码才放行——
         // 否则他改了数据一保存，库里存的还是那把忘掉的口令。
         "recover" => {
-            let code = msg["code"].as_str().unwrap_or("").to_string();
+            let code = Zeroizing::new(msg["code"].as_str().unwrap_or("").to_string());
             let mut store = lock!(st.store);
             match store.recover(&st.path, &code) {
                 Ok(()) => {
+                    *lock!(st.recovering) = true;
                     let n = store.projects().len();
                     push(app, json!({ "t": "recoverOk", "items": n }));
                 }
@@ -944,11 +1046,12 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
         }
 
         "recover_set_password" => {
-            let new = msg["new"].as_str().unwrap_or("").to_string();
+            let new = Zeroizing::new(msg["new"].as_str().unwrap_or("").to_string());
             let mut store = lock!(st.store);
             match store.set_password(&st.path, &new) {
                 Ok(()) => {
-                    *lock!(st.using_default_pwd) = new == "1021";
+                    *lock!(st.recovering) = false;
+                    *lock!(st.using_default_pwd) = new.as_str() == "1021";
                     *lock!(st.selected) = store
                         .projects()
                         .first()
@@ -987,11 +1090,27 @@ fn handle(app: &AppHandle, st: &AppState, msg: &Value) {
     }
 }
 
-#[tauri::command]
-fn host_message(app: AppHandle, state: State<'_, AppState>, json: String) {
-    if let Ok(msg) = serde_json::from_str::<Value>(&json) {
-        handle(&app, &state, &msg);
+fn wipe_json(value: &mut Value) {
+    match value {
+        Value::String(s) => secback_core::crypto::wipe_string(s),
+        Value::Array(a) => a.iter_mut().for_each(wipe_json),
+        Value::Object(o) => o.values_mut().for_each(wipe_json),
+        _ => {}
     }
+}
+
+#[tauri::command]
+async fn host_message(app: AppHandle, json: String) {
+    // 密钥派生、文件 I/O 和 Android 文件插件都不能阻塞主线程。
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let json = Zeroizing::new(json);
+        let state = app.state::<AppState>();
+        let _action = lock!(state.action);
+        if let Ok(mut msg) = serde_json::from_str::<Value>(&json) {
+            handle(&app, &state, &msg);
+            wipe_json(&mut msg);
+        }
+    }).await;
 }
 
 /// 启动应用。桌面由 main.rs 调用，Android 由系统通过 JNI 直接进这里。
@@ -1003,6 +1122,9 @@ pub fn run() {
     }
 
     let state = AppState {
+        action: Mutex::new(()),
+        session: Mutex::new(0),
+        recovering: Mutex::new(false),
         store: Mutex::new(Store::new()),
         path,
         selected: Mutex::new(String::new()),
@@ -1035,6 +1157,7 @@ pub fn run() {
     let builder = builder
         .manage(state)
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             spawn_idle_watchdog(app.handle().clone());
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1050,8 +1173,12 @@ pub fn run() {
                     }) = event
                     {
                         if let Some(p) = paths.first().cloned() {
+                            let h = h.clone();
+                            tauri::async_runtime::spawn_blocking(move || {
                             let st = h.state::<AppState>();
+                            let _action = lock!(st.action);
                             start_import(&h, st.inner(), p);
+                            });
                         }
                     }
                 });
@@ -1062,11 +1189,17 @@ pub fn run() {
     // 菜单事件只存在于桌面端（移动端没有 tauri::menu）。
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.on_menu_event(|app, event| {
+            let app = app.clone();
+            let event_id = event.id().as_ref().to_string();
+            tauri::async_runtime::spawn_blocking(move || {
             let st = app.state::<AppState>();
-            match event.id().as_ref() {
+            let _action = lock!(st.action);
+            let app = &app;
+            match event_id.as_str() {
                 "new" => push(app, json!({ "t": "cmd", "name": "new" })),
                 "delete" => push(app, json!({ "t": "cmd", "name": "delete" })),
                 "import" => pick_and_import(app.clone()),
+                "export" => pick_and_export(app.clone()),
                 "changePwd" => push(app, json!({ "t": "cmd", "name": "changePwd" })),
                 "setRecovery" => push(app, json!({ "t": "cmd", "name": "setRecovery" })),
                 "theme-dark" => {
@@ -1082,6 +1215,7 @@ pub fn run() {
                 "quit" => app.exit(0),
                 _ => {}
             }
+            });
         });
 
     builder

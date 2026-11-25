@@ -63,6 +63,9 @@
     <button class="tool" id="btn-import" title="从另一台机器导入">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 12v2h10v-2"/></svg>
     </button>
+    <button class="tool" id="btn-export" title="导出加密备份" aria-label="导出加密备份">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11V2M5 5l3-3 3 3M3 10v4h10v-4"/></svg>
+    </button>
     <button class="tool" id="btn-lock" title="锁定">
       <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>
     </button>
@@ -153,6 +156,8 @@
 <div class="overlay" id="sheet" hidden>
   <div class="sheet" role="dialog" aria-modal="true">
     <div class="sheet-grip"></div>
+    <button class="sheet-item" id="sheet-export" type="button">导出加密备份</button>
+    <p id="backup-status" class="backup-status" aria-live="polite"></p>
     <button class="sheet-item" id="sheet-changePwd" type="button">修改主密码</button>
     <button class="sheet-item" id="sheet-recovery" type="button">设置恢复码</button>
     <button class="sheet-item" id="sheet-theme" type="button">切换深色 / 浅色</button>

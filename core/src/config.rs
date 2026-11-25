@@ -181,10 +181,11 @@ mod tests {
 
     #[test]
     fn reads_absolute_path_from_config() {
-        let cfg = "vault = D:\\我的密库\\sec.properties\n";
-        let r = resolve_with(&exe(), Some(cfg), &no_env).unwrap();
+        let expected = exe().join("我的密库").join("sec.properties");
+        let cfg = format!("vault = {}\n", expected.display());
+        let r = resolve_with(&exe(), Some(&cfg), &no_env).unwrap();
         assert!(r.from_config);
-        assert_eq!(r.path.to_string_lossy(), "D:\\我的密库\\sec.properties");
+        assert_eq!(r.path, expected);
     }
 
     #[test]
@@ -257,10 +258,11 @@ mod tests {
 
     #[test]
     fn forward_slashes_are_normalized() {
-        let cfg = "vault = D:/a//b///sec.properties";
-        let r = resolve_with(&exe(), Some(cfg), &no_env).unwrap();
+        let expected = exe().join("a").join("b").join("sec.properties");
+        let cfg = format!("vault = {}/a//b///sec.properties", exe().display().to_string().replace('\\', "/"));
+        let r = resolve_with(&exe(), Some(&cfg), &no_env).unwrap();
         #[cfg(windows)]
-        assert_eq!(r.path.to_string_lossy(), "D:\\a\\b\\sec.properties");
+        assert_eq!(r.path, expected);
     }
 
     #[test]

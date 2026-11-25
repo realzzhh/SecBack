@@ -1419,6 +1419,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 @media (max-width: 700px) {
   .toolbar #btn-new,
   .toolbar #btn-import,
+  .toolbar #btn-export,
   .toolbar #btn-lock,
   .toolbar .divider {
     display: none;
@@ -1489,6 +1490,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
 /* 空状态提示里"底部/右上角"要按屏幕切换：手机是底部操作栏，桌面才是右上角 */
 .only-mobile { display: none; }
+.backup-status { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--muted); margin: 0 20px; }
+.backup-status:empty { display: none; }
 
 @media (max-width: 700px) {
   .only-mobile { display: inline; }

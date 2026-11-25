@@ -52,6 +52,11 @@ let impData = null;        // 导入预览的临时状态
 // 编辑弹层专用的 reveal 请求指纹。它和详情页的"显示"走同一条消息，
 // 但拿到后只填输入框、不写进 secrets 缓存，少留一份明文在内存里。
 const editReveals = new Set();
+const detailReveals = new Map();
+let detailRequest = 0;
+let editorSession = 0;
+let savingRequest = null;
+let confirmedDeleteId = null;
 
 const $ = id => document.getElementById(id);
 
@@ -219,7 +224,12 @@ function renderDetail() {
     history.pushState({ layer: "detail" }, "");
   }
 
-  if (!p) return;
+  if (!p) {
+    $("slots").replaceChildren();
+    $("p-name").textContent = "";
+    $("p-remark").textContent = "";
+    return;
+  }
 
   $("p-name").textContent = p.name;
   $("p-remark").textContent = p.remark || "";
@@ -288,35 +298,34 @@ function applySnapshot(msg) {
   S.canDown = !!msg.canDown;
   S.defaultPwd = !!msg.defaultPwd;
 
-  // 选区变了就丢弃旧的明文缓存，避免显示上一个项目的密码
-  const keep = {};
-  for (const k of Object.keys(secrets)) {
-    if (k.startsWith(S.selected + ":")) keep[k] = secrets[k];
-  }
-  secrets = keep;
+  secrets = {};
+  detailReveals.clear();
 
   render();
 }
 
 function onSecret(msg) {
-  // 编辑弹层的请求：只填输入框，不写进 secrets 缓存
-  const editKey = "edit:" + msg.id + ":" + msg.slot;
-  if (editReveals.has(editKey)) {
-    editReveals.delete(editKey);
-    if (editingId === msg.id && $("overlay").hidden === false) {
-      const box = $("m-slots").querySelector(`.slot-edit[data-slot="${msg.slot}"]`);
-      if (box) {
-        const inp = box.querySelector('[data-f="pass"]');
-        // 用户已经动手输入过就别覆盖了
-        if (inp && inp.dataset.edited !== "1") {
-          inp.value = msg.pass;
-          inp.placeholder = "";
-          box.dataset.originalPass = msg.pass;
-        }
+  if (typeof msg.request === "string" && msg.request.startsWith("detail:")) {
+    const key = secretKey(msg.id, msg.slot);
+    if (detailReveals.get(key) !== msg.request || $("app").hidden || msg.id !== S.selected) return;
+    detailReveals.delete(key);
+    secrets[key] = msg.pass;
+    renderDetail();
+    return;
+  }
+  if (msg.request != null) {
+    if (!editReveals.delete(msg.request)) return;
+    if (editingId === msg.id && !$('overlay').hidden) {
+      const box = $('m-slots').querySelector('.slot-edit[data-source="' + msg.slot + '"]');
+      const inp = box?.querySelector('[data-f="pass"]');
+      if (inp && inp.dataset.edited !== '1') {
+        inp.value = msg.pass;
+        inp.placeholder = '';
       }
     }
     return;
   }
+  if ($('app').hidden || msg.id !== S.selected) return;
 
   secrets[secretKey(msg.id, msg.slot)] = msg.pass;
   if (msg.id === S.selected) renderDetail();
@@ -348,6 +357,7 @@ onHost(raw => {
     }
 
     if (m.t === "loggedIn") {
+      document.querySelectorAll('#login input, #recover input, #recnew input').forEach(el => el.value = "");
       showMain();
       return;
     }
@@ -378,9 +388,24 @@ onHost(raw => {
     }
 
     if (m.t === "loggedOut") {
+      savingRequest = null;
+      closeEditor();
+      document.querySelectorAll(".overlay").forEach(el => el.hidden = true);
+      document.querySelectorAll("input, textarea").forEach(el => el.value = "");
+      $("reccode-text").textContent = "";
+      query = "";
+      confirmedDeleteId = null;
+      wantDetail = false;
       S = { projects: [], selected: "", canUp: false, canDown: false, defaultPwd: false };
       secrets = {};
       editReveals.clear();
+      detailReveals.clear();
+      $("imp-tree").replaceChildren();
+      $("imp-file").textContent = "";
+      $("imp-sum").textContent = "";
+      $("ipwd-file").textContent = "";
+      $("toasts").replaceChildren();
+      $("backup-status").textContent = "";
 
       // 锁定时必须把弹层收掉，并把里面的内容清空。
       // 否则编辑框会盖在登录页上，而里面还留着刚取出来的明文密码。
@@ -392,6 +417,7 @@ onHost(raw => {
       $("recpwd").hidden = true;
       $("reccode").hidden = true;
       $("recover").hidden = true;
+      $("recover-input").value = "";
       $("recnew").hidden = true;
       $("recpwd-input").value = "";
       $("recover-input").value = "";
@@ -417,6 +443,22 @@ onHost(raw => {
       return;
     }
 
+    if (m.t === "exportResult") {
+      $("backup-status").textContent = "本次备份：" + new Date().toLocaleString("zh-CN") + "\n" + m.destination;
+      return;
+    }
+    if (m.t === "saveResult") {
+      if (m.request !== savingRequest) return;
+      savingRequest = null;
+      $("modal-save").disabled = false;
+      $("overlay").querySelector(".modal-body").inert = false;
+      if (m.ok) closeEditor();
+      return;
+    }
+    if (m.t === "rekeyResult") {
+      if (m.ok) $("pwd-cancel").click();
+      return;
+    }
     if (m.t === "snapshot") {
       applySnapshot(m);
       return;
@@ -447,6 +489,7 @@ onHost(raw => {
 
     if (m.t === "importPreview") {
       $("ipwd").hidden = true;
+      $("ipwd-input").value = "";
       showImportPreview(m);
       return;
     }
@@ -560,12 +603,15 @@ $("detail").addEventListener("click", e => {
   if (act === "toggle-pass") {
     if (Object.prototype.hasOwnProperty.call(secrets, key)) {
       delete secrets[key];
+      detailReveals.delete(key);
       renderDetail();
     } else {
       // 先占位，收到 secret 再重绘
       secrets[key] = "…";
       renderDetail();
-      send({ t: "reveal", id: S.selected, slot });
+      const request = "detail:" + ++detailRequest;
+      detailReveals.set(key, request);
+      send({ t: "reveal", id: S.selected, slot, request });
     }
   }
 });
@@ -578,8 +624,10 @@ $("btn-edit").addEventListener("click", () => {
 // 删除不可逆，先弹确认。确认框里带上项目名，避免删错。
 // 按工具栏按钮和按菜单走的是同一个入口。
 function askDelete() {
+  if (!$("confirm").hidden || !$("overlay").hidden || $("app").hidden) return;
   const p = projectById(S.selected);
   if (!p) return;
+  confirmedDeleteId = p.id;
   $("confirm-name").textContent = p.name;
   $("confirm").hidden = false;
   // 焦点给"取消"：用户按了删除后手可能还在回车上，不能让他一按就把项目删了
@@ -594,7 +642,8 @@ $("confirm-cancel").addEventListener("click", () => {
 
 $("confirm-ok").addEventListener("click", () => {
   $("confirm").hidden = true;
-  send({ t: "delete" });
+  if (confirmedDeleteId) send({ t: "delete", id: confirmedDeleteId });
+  confirmedDeleteId = null;
 });
 
 // 点遮罩空白处等同取消；点到弹层本体不算
@@ -650,7 +699,7 @@ document.addEventListener("keydown", e => {
   }
   if (e.key === "Delete" && S.selected && document.activeElement.tagName !== "INPUT") {
     e.preventDefault();
-    send({ t: "delete" });
+    askDelete();
   }
 });
 
@@ -664,7 +713,7 @@ function slotEditHtml(i, s, expanded, removable) {
 
   // 密码直接显示原文：打开弹层时单独取一次（见 openEditor）。
   // 框里先空着并提示"读取中…"，拿到之前用户要是已经动手输入，就不再覆盖。
-  return `<div class="slot-edit${expanded ? " expanded" : ""}" data-slot="${i}">
+  return `<div class="slot-edit${expanded ? " expanded" : ""}" data-slot="${i}" data-source="${s ? i : -1}">
     <div class="slot-edit-head">
       <button class="slot-toggle" type="button" data-toggle="${i}">
         <svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
@@ -711,12 +760,18 @@ function renderSlotsEdit(p) {
 }
 
 function openEditor(p) {
+  if (savingRequest || $("app").hidden) return;
+  editorSession++;
+  editReveals.clear();
+  savingRequest = null;
+  $("modal-save").disabled = false;
+  $("overlay").querySelector(".modal-body").inert = false;
   editingId = p ? p.id : null;
   $("modal-title").textContent = p ? "编辑项目" : "新增项目";
   $("m-name").value = p ? p.name : "";
   $("m-remark").value = p ? p.remark : "";
   // 只显示实际有内容的槽（至少 1 个），不再固定摆三个空壳
-  const filled = p ? p.slots.filter(x => x && !x.empty).length : 0;
+  const filled = p ? p.slots.reduce((last, x, i) => x && !x.empty ? i + 1 : last, 0) : 0;
   editSlotCount = Math.max(1, Math.min(3, filled));
   expandedSlot = 0;
   renderSlotsEdit(p);
@@ -726,8 +781,9 @@ function openEditor(p) {
   if (p) {
     for (let i = 0; i < 3; ++i) {
       if (!p.slots[i].empty && p.slots[i].hasPass) {
-        editReveals.add("edit:" + p.id + ":" + i);
-        send({ t: "reveal", id: p.id, slot: i });
+        const request = "edit:" + editorSession + ":" + i;
+        editReveals.add(request);
+        send({ t: "reveal", id: p.id, slot: i, request });
       }
     }
   }
@@ -740,6 +796,12 @@ function openEditor(p) {
 }
 
 function closeEditor() {
+  if (savingRequest) return;
+  editorSession++;
+  editReveals.clear();
+  $("m-name").value = "";
+  $("m-remark").value = "";
+  $("overlay").querySelector(".modal-body").inert = false;
   $("overlay").hidden = true;
   // 框里现在是明文密码，关掉就清干净，别留在 DOM 里
   $("m-slots").innerHTML = "";
@@ -761,6 +823,8 @@ $("m-slots").addEventListener("click", e => {
     box.querySelectorAll("input").forEach(inp => {
       inp.value = "";
       inp.dataset.mask = "0";
+      inp.dataset.edited = "1";
+      inp.placeholder = inp.dataset.f === "pass" ? "密码" : inp.placeholder;
     });
     return;
   }
@@ -797,28 +861,13 @@ $("m-slots").addEventListener("click", e => {
     return;
   }
 
-  // 删除账户：把后面的内容整体前移，再移除最后一个 DOM 节点。
-  // 这样不用重画整个列表，已填的内容一个都不会丢。
+  // 删除对应节点，保留其余账户的原始槽位和密码编辑状态。
   const rm = e.target.closest("button[data-remove]");
   if (rm) {
     if (editSlotCount <= 1) return;
     const boxes = [...$("m-slots").querySelectorAll(".slot-edit")];
     const idx = Number(rm.dataset.remove);
-    for (let i = idx; i < boxes.length - 1; i++) {
-      const from = boxes[i + 1], to = boxes[i];
-      for (const f of ["user", "pass", "remark"]) {
-        const a = to.querySelector(`[data-f="${f}"]`);
-        const b = from.querySelector(`[data-f="${f}"]`);
-        a.value = b.value;
-        if (b.dataset.haspass) a.dataset.haspass = b.dataset.haspass;
-        if (from.dataset.originalPass !== undefined) {
-          to.dataset.originalPass = from.dataset.originalPass;
-        }
-      }
-      to.dataset.originalPass = from.dataset.originalPass;
-      if (from.dataset.originalPass === undefined) delete to.dataset.originalPass;
-    }
-    boxes[boxes.length - 1].remove();
+    boxes[idx].remove();
     editSlotCount--;
     if (expandedSlot >= idx) expandedSlot = Math.max(0, expandedSlot - 1);
     // 槽位下标要重排，否则 data-slot 和实际顺序对不上
@@ -892,24 +941,19 @@ $("modal-save").addEventListener("click", () => {
     const passInp = box.querySelector('[data-f="pass"]');
     const pass = passInp.value;
 
-    // 密码框里是明文原文，所以提交时靠"和原值比对"判断有没有改：
-    //   没取到原值（原本就没密码）-> 有内容就是新密码，否则空
-    //   和原值相同              -> null（不重写，避免无谓的一次密码落盘）
-    //   不同（含被清空）        -> 提交当前值
-    const original = box.dataset.originalPass;
-    let passField;
-    if (original === undefined)
-      passField = pass.length > 0 ? pass : "";
-    else if (pass === original)
-      passField = null;
-    else
-      passField = pass;
+    // 未修改的密码由宿主从原始槽位提取，读取尚未返回也能安全保存。
+    const source = Number(box.dataset.source);
+    const passField = source >= 0 && passInp.dataset.edited !== "1" ? null : pass;
+    msg["s" + i] = { user, remark, pass: passField, source };
 
-    msg["s" + i] = { user, remark, pass: passField };
   }
 
+  if (savingRequest) return;
+  savingRequest = "save:" + editorSession;
+  msg.request = savingRequest;
+  $("modal-save").disabled = true;
+  $("overlay").querySelector(".modal-body").inert = true;
   send(msg);
-  closeEditor();
 });
 
 // 新增/保存后由宿主推新快照；这里只负责关窗
@@ -923,10 +967,10 @@ document.addEventListener("keydown", e => {
     send({ t: "import_cancel" });
     return;
   }
-  if ($("pwd").hidden === false) { $("pwd").hidden = true; return; }
-  if ($("recpwd").hidden === false) { $("recpwd").hidden = true; return; }
+  if ($("pwd").hidden === false) { $("pwd-cancel").click(); return; }
+  if ($("recpwd").hidden === false) { $("recpwd-cancel").click(); return; }
   if ($("reccode").hidden === false) { $("reccode-cancel").click(); return; }
-  if ($("recover").hidden === false) { $("recover").hidden = true; return; }
+  if ($("recover").hidden === false) { $("recover-cancel").click(); return; }
   if ($("recnew").hidden === false) { $("recnew-cancel").click(); return; }
   if ($("confirm").hidden === false) $("confirm").hidden = true;
 });
@@ -1043,6 +1087,9 @@ $("imp-tree").addEventListener("change", ev => {
 
 function closeImport() {
   $("imp").hidden = true;
+  $("imp-tree").replaceChildren();
+  $("imp-file").textContent = "";
+  $("imp-sum").textContent = "";
   impData = null;
   send({ t: "import_cancel" });
 }
@@ -1069,6 +1116,7 @@ $("imp-ok").addEventListener("click", () => {
 
   send({ t: "import_commit", mergeSameName, skipProjects, excludeSlots });
   $("imp").hidden = true;
+  $("imp-tree").replaceChildren();
   impData = null;
 });
 
@@ -1112,7 +1160,6 @@ $("pwd-ok").addEventListener("click", () => {
   if (n1 !== n2) { $("pwd-err").textContent = "两次输入的新密码不一致"; return; }
 
   send({ t: "rekey", old: oldp, new: n1 });
-  $("pwd").hidden = true;
 });
 
 $("pwd-cancel").addEventListener("click", () => {
@@ -1142,6 +1189,7 @@ function showRecoveryCode(code) {
   $("rec-confirm").value = "";
   $("reccode-err").textContent = "";
   $("recpwd").hidden = true;
+  $("recpwd-input").value = "";
   $("reccode").hidden = false;
   setTimeout(() => $("rec-confirm").focus(), 30);
 }
@@ -1196,12 +1244,16 @@ $("reccode-ok").addEventListener("click", () => {
   }
   $("reccode").hidden = true;
   recCodeText = "";
+  $("reccode-text").textContent = "";
+  $("rec-confirm").value = "";
   toast("ok", "恢复码已生效。请把那张纸收在安全的地方。");
 });
 
 $("reccode-cancel").addEventListener("click", () => {
   $("reccode").hidden = true;
   recCodeText = "";
+  $("reccode-text").textContent = "";
+  $("rec-confirm").value = "";
   // 码已经生成并写进密库了，没抄下来等于没有——必须说明白
   toast("warn", "恢复码已生成但没有确认抄写。忘了密码时它救不了你，建议重新设一次。");
 });
@@ -1274,6 +1326,9 @@ const closeSheet = () => { $("sheet").hidden = true; };
 
 $("sheet-cancel").addEventListener("click", closeSheet);
 
+$("sheet-export").addEventListener("click", () => { closeSheet(); send({ t: "export" }); });
+$("btn-export").addEventListener("click", () => send({ t: "export" }));
+
 $("sheet-changePwd").addEventListener("click", () => {
   closeSheet();
   openChangePwd();
@@ -1338,7 +1393,13 @@ overlayEls.forEach(el =>
 function handleBack() {
   const top = topLayer();
   if (top) {
-    top.hidden = true;   // 栈已经退过了，这里只同步界面，不再退栈
+    if (top.id === "overlay") closeEditor();
+    else if (top.id === "imp") closeImport();
+    else {
+      const cancel = $(top.id + "-cancel");
+      if (cancel) cancel.click();
+      else { top.hidden = true; top.querySelectorAll("input").forEach(el => el.value = ""); }
+    }
     return true;
   }
   if (document.body.classList.contains("showing-detail")) {

@@ -53,6 +53,14 @@ pub struct Account {
     pub remark: String,
 }
 
+impl Drop for Account {
+    fn drop(&mut self) {
+        crate::crypto::wipe_string(&mut self.user);
+        crate::crypto::wipe_string(&mut self.pass);
+        crate::crypto::wipe_string(&mut self.remark);
+    }
+}
+
 impl Account {
     pub fn empty() -> Self {
         Self {
@@ -76,6 +84,13 @@ pub struct Project {
     pub name: String,
     pub remark: String,
     pub slots: [Account; MAX_SLOTS],
+}
+
+impl Drop for Project {
+    fn drop(&mut self) {
+        crate::crypto::wipe_string(&mut self.name);
+        crate::crypto::wipe_string(&mut self.remark);
+    }
 }
 
 impl Project {

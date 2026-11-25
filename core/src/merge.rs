@@ -226,6 +226,18 @@ pub fn merge(local: &[Project], incoming: &[Project], opt: &MergeOptions) -> Mer
         // 副本 id 由 (对方项目 id, 组号) 确定性派生，所以同一个文件导入
         // 第二次会落到同一条副本上，里面的账户已存在 → 结果幂等。
         let mut group: u32 = 1;
+        // 先在全部既有副本判重，避免某个早期副本被腾空后重复填入后期副本已有账户。
+        overflow.retain(|acc| {
+            let mut n = 1;
+            loop {
+                let cid = derive_copy_id(&src.id, n);
+                match r.merged.iter().find(|p| p.id == cid) {
+                    Some(p) if has_account(p, acc) => return false,
+                    Some(_) => n += 1,
+                    None => return true,
+                }
+            }
+        });
         let mut i = 0;
         while i < overflow.len() {
             let cid = derive_copy_id(&src.id, group);
@@ -249,18 +261,19 @@ pub fn merge(local: &[Project], incoming: &[Project], opt: &MergeOptions) -> Mer
                 }
             };
 
-            let end = (i + MAX_SLOTS).min(overflow.len());
-            for k in i..end {
-                if has_account(&r.merged[cp_idx], &overflow[k]) {
-                    continue;
-                }
-                if let Some(slot) = first_empty_slot(&r.merged[cp_idx]) {
-                    r.merged[cp_idx].slots[slot] = overflow[k].clone();
+            // 只有判重或真正插入才消费账户；满副本继续尝试下一组。
+            while i < overflow.len() {
+                if has_account(&r.merged[cp_idx], &overflow[i]) {
+                    i += 1;
+                } else if let Some(slot) = first_empty_slot(&r.merged[cp_idx]) {
+                    r.merged[cp_idx].slots[slot] = overflow[i].clone();
                     r.slots_added += 1;
+                    i += 1;
+                } else {
+                    break;
                 }
             }
 
-            i += MAX_SLOTS;
             group += 1;
         }
 
@@ -279,6 +292,35 @@ pub fn merge(local: &[Project], incoming: &[Project], opt: &MergeOptions) -> Mer
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overflow_survives_full_or_edited_existing_copies() {
+        for free in [0, 1, 2] {
+            let mut local = proj(7, "原项目");
+            let mut incoming = local.clone();
+            for i in 0..MAX_SLOTS {
+                local.slots[i] = acc(&format!("本机{i}"), "old");
+                incoming.slots[i] = acc(&format!("外部{i}"), "new");
+            }
+            let mut copy = Project::new_with_id(derive_copy_id(&incoming.id, 1));
+            copy.name = "用户改过的副本".into();
+            for i in 0..MAX_SLOTS - free { copy.slots[i] = acc(&format!("副本{i}"), "keep"); }
+            let first = merge(&[local, copy], &[incoming.clone()], &MergeOptions::default());
+            for account in &incoming.slots {
+                assert!(first.merged.iter().any(|p| p.slots.contains(account)));
+            }
+            assert_eq!(first.slots_added, 3);
+            let second = merge(&first.merged, &[incoming.clone()], &MergeOptions::default());
+            assert_eq!(second.slots_added, 0);
+            assert_eq!(second.added, 0);
+            // 早期副本腾出空位也不能把后期副本里的账户再复制一遍。
+            let mut edited = first.merged;
+            edited[1].slots[0] = Account::empty();
+            let third = merge(&edited, &[incoming], &MergeOptions::default());
+            assert_eq!(third.slots_added, 0);
+            assert_eq!(third.added, 0);
+        }
+    }
 
     fn proj(id_byte: u8, name: &str) -> Project {
         let mut p = Project::new_with_id([id_byte; 16]);

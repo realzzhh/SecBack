@@ -13,6 +13,7 @@ use crate::format::{
     WRAPPED_DEK_LEN,
 };
 use std::fs;
+use zeroize::Zeroizing;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -103,6 +104,17 @@ impl Store {
         }
     }
 
+    /// 临时事务副本；失败时析构并擦除，成功时替换原对象。
+    pub fn staged(&self) -> Self {
+        Self { projects: self.projects.clone(), key: self.key, hdr: self.hdr.clone(), unlocked: self.unlocked }
+    }
+
+    pub fn commit(&mut self, path: &Path, mut candidate: Self) -> Result<(), Err> {
+        candidate.save(path)?;
+        std::mem::swap(self, &mut candidate);
+        Ok(())
+    }
+
     pub fn projects(&self) -> &[Project] {
         &self.projects
     }
@@ -153,17 +165,18 @@ impl Store {
         let salt = crypto::random_fixed::<SALT_LEN>().ok_or(Err::CryptoFail)?;
         // 新建的库是 v1：不带恢复槽，C++ 版也能读。
         // 用户主动去设恢复码时才升 v2。
-        self.hdr = Header {
+        let mut candidate = Store::new();
+        candidate.hdr = Header {
             version: FORMAT_VERSION,
             iterations: crypto::ITERATIONS,
             salt,
             ..Default::default()
         };
-        self.key = crypto::derive_key(password, &salt, self.hdr.iterations);
-        self.projects.clear();
-        self.unlocked = true;
+        candidate.key = crypto::derive_key(password, &salt, candidate.hdr.iterations);
+        candidate.projects.clear();
+        candidate.unlocked = true;
 
-        self.save(path)?;
+        self.commit(path, candidate)?;
         Ok(true)
     }
 
@@ -196,11 +209,10 @@ impl Store {
             return Err(Err::Corrupt);
         }
 
-        let key = if h.version >= FORMAT_VERSION_V2 {
+        let key = Zeroizing::new(if h.version >= FORMAT_VERSION_V2 {
             // v2：口令只负责解开 DEK，真正的载荷密钥是那个随机 DEK
-            let kek = crypto::derive_key(password, &h.salt, h.iterations);
-            let dek = crypto::open(&kek, &h.wrap_nonce, &h.wrapped_dek)
-                .map_err(|_| Err::BadPassword)?;
+            let kek = Zeroizing::new(crypto::derive_key(password, &h.salt, h.iterations));
+            let dek = Zeroizing::new(crypto::open(&kek, &h.wrap_nonce, &h.wrapped_dek).map_err(|_| Err::BadPassword)?);
             if dek.len() != DEK_LEN {
                 return Err(Err::Corrupt);
             }
@@ -209,15 +221,15 @@ impl Store {
             k
         } else {
             crypto::derive_key(password, &h.salt, h.iterations)
-        };
+        });
 
-        let plain = crypto::open(&key, &h.nonce, &bytes[hsize..])
-            .map_err(|_| Err::BadPassword)?;
+        let plain = Zeroizing::new(crypto::open(&key, &h.nonce, &bytes[hsize..]).map_err(|_| Err::BadPassword)?);
 
         let projects = format::deserialize(&plain).map_err(|_| Err::Corrupt)?;
 
         // 走到这里才算真的解开了：前面任何一步失败都不改现有状态。
-        self.key = key;
+        self.clear_secure();
+        self.key = *key;
         self.hdr = h;
         self.projects = projects;
         self.unlocked = true;
@@ -228,7 +240,7 @@ impl Store {
         if !self.unlocked {
             return Err(Err::Locked);
         }
-        let plain = format::serialize(&self.projects);
+        let plain = Zeroizing::new(format::serialize(&self.projects));
         let nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
         let blob = crypto::seal(&self.key, &nonce, &plain).map_err(|_| Err::CryptoFail)?;
 
@@ -251,7 +263,7 @@ impl Store {
         if !self.unlocked {
             return Err(Err::Locked);
         }
-        let plain = format::serialize(projects);
+        let plain = Zeroizing::new(format::serialize(projects));
         let nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
         let blob = crypto::seal(&self.key, &nonce, &plain).map_err(|_| Err::CryptoFail)?;
 
@@ -280,34 +292,32 @@ impl Store {
 
         if probe.hdr.version >= FORMAT_VERSION_V2 {
             // v2：DEK 不动，只用新口令把它重新包一遍。整个库不用重加密。
-            let dek = probe.key;
-            let kek = crypto::derive_key(new_pwd, &new_salt, probe.hdr.iterations);
+            let dek = Zeroizing::new(probe.key);
+            let kek = Zeroizing::new(crypto::derive_key(new_pwd, &new_salt, probe.hdr.iterations));
             let wrap_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
-            let wrapped = crypto::seal(&kek, &wrap_nonce, &dek).map_err(|_| Err::CryptoFail)?;
+            let wrapped = crypto::seal(&kek, &wrap_nonce, &dek[..]).map_err(|_| Err::CryptoFail)?;
             if wrapped.len() != WRAPPED_DEK_LEN {
                 return Err(Err::CryptoFail);
             }
 
-            self.hdr = probe.hdr.clone();
-            self.hdr.salt = new_salt;
-            self.hdr.wrap_nonce = wrap_nonce;
-            self.hdr.wrapped_dek.copy_from_slice(&wrapped);
-            self.key = dek;
+            probe.hdr.salt = new_salt;
+            probe.hdr.wrap_nonce = wrap_nonce;
+            probe.hdr.wrapped_dek.copy_from_slice(&wrapped);
+            probe.key = *dek;
         } else {
             // v1：密钥本身就是口令派生的，只能整库重新加密
-            self.hdr = Header {
+            probe.hdr = Header {
                 version: FORMAT_VERSION,
                 iterations: probe.hdr.iterations,
                 salt: new_salt,
                 ..Default::default()
             };
-            self.key = crypto::derive_key(new_pwd, &new_salt, probe.hdr.iterations);
+            probe.key = crypto::derive_key(new_pwd, &new_salt, probe.hdr.iterations);
         }
 
         // 用磁盘上读到的内容写，而不是内存里的——避免"内存有未保存改动"时被静默覆盖
-        self.projects = std::mem::take(&mut probe.projects);
-        self.unlocked = true;
-        self.save(path)
+        probe.unlocked = true;
+        self.commit(path, probe)
     }
 
     /// 这个库有没有设恢复码。
@@ -330,41 +340,41 @@ impl Store {
         probe.load(path, password)?;
 
         // v1 的 key 是口令派生出来的，当不了独立 DEK——升级时得换一个随机的
-        let dek = if probe.hdr.version < FORMAT_VERSION_V2 {
+        let dek = Zeroizing::new(if probe.hdr.version < FORMAT_VERSION_V2 {
             crypto::random_fixed::<DEK_LEN>().ok_or(Err::CryptoFail)?
         } else {
             probe.key
-        };
+        });
 
-        let kek = crypto::derive_key(password, &probe.hdr.salt, probe.hdr.iterations);
+        let kek = Zeroizing::new(crypto::derive_key(password, &probe.hdr.salt, probe.hdr.iterations));
         let wrap_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
-        let wrapped = crypto::seal(&kek, &wrap_nonce, &dek).map_err(|_| Err::CryptoFail)?;
+        let wrapped = crypto::seal(&kek, &wrap_nonce, &dek[..]).map_err(|_| Err::CryptoFail)?;
         if wrapped.len() != WRAPPED_DEK_LEN {
             return Err(Err::CryptoFail);
         }
 
-        let (_, code) = restore::generate().ok_or(Err::CryptoFail)?;
+        let (raw, code) = restore::generate().ok_or(Err::CryptoFail)?;
+        let _raw = Zeroizing::new(raw);
+        let code = Zeroizing::new(code);
         let rec_salt = crypto::random_fixed::<SALT_LEN>().ok_or(Err::CryptoFail)?;
-        let rec_kek = crypto::derive_key(&code, &rec_salt, probe.hdr.iterations);
+        let rec_kek = Zeroizing::new(crypto::derive_key(&code, &rec_salt, probe.hdr.iterations));
         let rec_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
-        let rec_wrapped = crypto::seal(&rec_kek, &rec_nonce, &dek).map_err(|_| Err::CryptoFail)?;
+        let rec_wrapped = crypto::seal(&rec_kek, &rec_nonce, &dek[..]).map_err(|_| Err::CryptoFail)?;
         if rec_wrapped.len() != WRAPPED_DEK_LEN {
             return Err(Err::CryptoFail);
         }
 
-        self.hdr = probe.hdr.clone();
-        self.hdr.version = FORMAT_VERSION_V2;
-        self.hdr.flags |= FLAG_RECOVERY;
-        self.hdr.wrap_nonce = wrap_nonce;
-        self.hdr.wrapped_dek.copy_from_slice(&wrapped);
-        self.hdr.recovery_salt = rec_salt;
-        self.hdr.recovery_nonce = rec_nonce;
-        self.hdr.recovery_wrapped_dek.copy_from_slice(&rec_wrapped);
-        self.key = dek;
-        self.projects = std::mem::take(&mut probe.projects);
-        self.unlocked = true;
+        probe.hdr.version = FORMAT_VERSION_V2;
+        probe.hdr.flags |= FLAG_RECOVERY;
+        probe.hdr.wrap_nonce = wrap_nonce;
+        probe.hdr.wrapped_dek.copy_from_slice(&wrapped);
+        probe.hdr.recovery_salt = rec_salt;
+        probe.hdr.recovery_nonce = rec_nonce;
+        probe.hdr.recovery_wrapped_dek.copy_from_slice(&rec_wrapped);
+        probe.key = *dek;
+        probe.unlocked = true;
 
-        self.save(path)?;
+        self.commit(path, probe)?;
         Ok(restore::pretty(&code))
     }
 
@@ -382,25 +392,25 @@ impl Store {
             return Err(Err::NoRecovery);
         }
 
-        let norm = restore::normalize(code).ok_or(Err::BadRestoreCode)?;
+        let norm = Zeroizing::new(restore::normalize(code).ok_or(Err::BadRestoreCode)?);
         let hsize = h.size();
         if bytes.len() != hsize + h.payload_size as usize {
             return Err(Err::Corrupt);
         }
 
-        let kek = crypto::derive_key(&norm, &h.recovery_salt, h.iterations);
-        let dek = crypto::open(&kek, &h.recovery_nonce, &h.recovery_wrapped_dek)
-            .map_err(|_| Err::BadRestoreCode)?;
+        let kek = Zeroizing::new(crypto::derive_key(&norm, &h.recovery_salt, h.iterations));
+        let dek = Zeroizing::new(crypto::open(&kek, &h.recovery_nonce, &h.recovery_wrapped_dek).map_err(|_| Err::BadRestoreCode)?);
         if dek.len() != DEK_LEN {
             return Err(Err::Corrupt);
         }
-        let mut key = [0u8; KEY_LEN];
+        let mut key = Zeroizing::new([0u8; KEY_LEN]);
         key.copy_from_slice(&dek);
 
-        let plain = crypto::open(&key, &h.nonce, &bytes[hsize..]).map_err(|_| Err::Corrupt)?;
+        let plain = Zeroizing::new(crypto::open(&key, &h.nonce, &bytes[hsize..]).map_err(|_| Err::Corrupt)?);
         let projects = format::deserialize(&plain).map_err(|_| Err::Corrupt)?;
 
-        self.key = key;
+        self.clear_secure();
+        self.key = *key;
         self.hdr = h;
         self.projects = projects;
         self.unlocked = true;
@@ -420,17 +430,18 @@ impl Store {
         }
 
         let new_salt = crypto::random_fixed::<SALT_LEN>().ok_or(Err::CryptoFail)?;
-        let kek = crypto::derive_key(new_pwd, &new_salt, self.hdr.iterations);
+        let kek = Zeroizing::new(crypto::derive_key(new_pwd, &new_salt, self.hdr.iterations));
         let wrap_nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
         let wrapped = crypto::seal(&kek, &wrap_nonce, &self.key).map_err(|_| Err::CryptoFail)?;
         if wrapped.len() != WRAPPED_DEK_LEN {
             return Err(Err::CryptoFail);
         }
 
-        self.hdr.salt = new_salt;
-        self.hdr.wrap_nonce = wrap_nonce;
-        self.hdr.wrapped_dek.copy_from_slice(&wrapped);
-        self.save(path)
+        let mut candidate = self.staged();
+        candidate.hdr.salt = new_salt;
+        candidate.hdr.wrap_nonce = wrap_nonce;
+        candidate.hdr.wrapped_dek.copy_from_slice(&wrapped);
+        self.commit(path, candidate)
     }
 
     pub fn find_index(&self, id: &[u8; 16]) -> Option<usize> {
@@ -566,6 +577,112 @@ pub fn make_id() -> Option<[u8; 16]> {
 mod tests {
     use super::*;
     use crate::format::Account;
+
+    // 这些回归只测事务，不测 KDF 强度；降低轮数让故障矩阵保持快速。
+    fn transaction_fixture(name: &str) -> (Store, PathBuf, PathBuf) {
+        let path = tmp_path(name);
+        let block = PathBuf::from(format!("{}.tmp", path.display()));
+        let mut s = Store::new();
+        s.hdr.salt = [4; SALT_LEN];
+        s.hdr.iterations = 1000;
+        s.key = crypto::derive_key("old-password", &s.hdr.salt, s.hdr.iterations);
+        s.unlocked = true;
+        s.projects.push(sample_project("原项目", "原账户", "原密码"));
+        s.save(&path).unwrap();
+        (s, path, block)
+    }
+
+    #[test]
+    fn failed_project_transactions_keep_memory_and_disk() {
+        for operation in ["create", "save", "delete", "reorder"] {
+            let (mut s, path, block) = transaction_fixture(operation);
+            s.projects.push(sample_project("第二项", "u", "p"));
+            s.save(&path).unwrap();
+            let before = fs::read(&path).unwrap();
+            fs::create_dir(&block).unwrap();
+            let mut candidate = s.staged();
+            match operation {
+                "create" => candidate.projects.push(sample_project("新增", "u", "p")),
+                "save" => candidate.projects[0].name = "修改".into(),
+                "delete" => { candidate.projects.remove(0); },
+                _ => { candidate.move_item(0, 1); },
+            }
+            assert_eq!(s.commit(&path, candidate), Err(Err::Io));
+            assert_eq!(s.projects.len(), 2);
+            assert_eq!(s.projects[0].name, "原项目");
+            assert_eq!(fs::read(&path).unwrap(), before);
+            fs::remove_dir(block).unwrap();
+            s.save(&path).unwrap();
+            let mut disk = Store::new();
+            disk.load(&path, "old-password").unwrap();
+            assert_eq!(disk.projects[0].name, "原项目");
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn failed_rekey_does_not_activate_new_password_on_later_save() {
+        for v2 in [false, true] {
+            let (mut s, path, block) = transaction_fixture(if v2 {"rekey-v2-fail"} else {"rekey-v1-fail"});
+            if v2 { s.enable_recovery(&path, "old-password").unwrap(); }
+            fs::create_dir(&block).unwrap();
+            assert_eq!(s.rekey(&path, "old-password", "new-password"), Err(Err::Io));
+            fs::remove_dir(block).unwrap();
+            s.save(&path).unwrap();
+            let mut disk = Store::new();
+            disk.load(&path, "old-password").unwrap();
+            assert_eq!(disk.load(&path, "new-password"), Err(Err::BadPassword));
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn failed_recovery_change_keeps_original_header() {
+        let (mut s, path, block) = transaction_fixture("recovery-fail");
+        fs::create_dir(&block).unwrap();
+        assert_eq!(s.enable_recovery(&path, "old-password"), Err(Err::Io));
+        assert!(!s.has_recovery());
+        fs::remove_dir(&block).unwrap();
+        let code = s.enable_recovery(&path, "old-password").unwrap();
+        let old_header = s.hdr.clone();
+        fs::create_dir(&block).unwrap();
+        assert_eq!(s.enable_recovery(&path, "old-password"), Err(Err::Io));
+        assert_eq!(s.hdr, old_header);
+        fs::remove_dir(block).unwrap();
+        s.save(&path).unwrap();
+        let mut disk = Store::new();
+        disk.recover(&path, &code).unwrap();
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn failed_recovery_password_keeps_old_password_and_recovery() {
+        let (mut s, path, block) = transaction_fixture("set-password-fail");
+        let code = s.enable_recovery(&path, "old-password").unwrap();
+        s.recover(&path, &code).unwrap();
+        let header = s.hdr.clone();
+        fs::create_dir(&block).unwrap();
+        assert_eq!(s.set_password(&path, "new-password"), Err(Err::Io));
+        assert_eq!(s.hdr, header);
+        fs::remove_dir(block).unwrap();
+        s.save(&path).unwrap();
+        let mut disk = Store::new();
+        disk.load(&path, "old-password").unwrap();
+        disk.recover(&path, &code).unwrap();
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn failed_create_keeps_store_locked() {
+        let path = tmp_path("create-fail");
+        let block = PathBuf::from(format!("{}.tmp", path.display()));
+        fs::create_dir(&block).unwrap();
+        let mut s = Store::new();
+        assert_eq!(s.load_or_create(&path, "password", true), Err(Err::Io));
+        assert!(!s.is_unlocked());
+        assert_eq!(s.key, [0; KEY_LEN]);
+        fs::remove_dir(block).unwrap();
+    }
 
     fn tmp_path(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
