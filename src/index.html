@@ -94,7 +94,13 @@
 
       <div class="pane" id="pane" hidden>
         <div class="pane-head">
-          <button class="pane-back" id="pane-back" type="button" aria-label="返回列表">‹</button>
+          <!-- 用 SVG 而不是字符「‹」：字符本身带字体内边距，
+               放在圆里永远看着偏，怎么调 padding 都对不齐。 -->
+          <button class="pane-back" id="pane-back" type="button" aria-label="返回列表">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M14.5 5.5L8 12l6.5 6.5"/>
+            </svg>
+          </button>
           <div class="pane-title">
             <h1 id="p-name"></h1>
             <p id="p-remark" class="p-remark"></p>

@@ -666,11 +666,20 @@ function slotEditHtml(i, s) {
       <button class="clear" data-clear="${i}">清空</button>
     </div>
     <div class="grid">
-      <input data-f="user"   placeholder="账号"          value="${esc(empty ? "" : s.user)}">
-      <input data-f="pass"   type="text" autocomplete="off" spellcheck="false"
-             placeholder="${hasPass ? "读取中…" : "密码"}"
-             value="" data-haspass="${hasPass ? "1" : "0"}">
-      <input data-f="remark" class="full" placeholder="备注" value="${esc(empty ? "" : s.remark)}">
+      <label class="ifield">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.2" r="2.6"/><path d="M3 13.4c0-2.6 2.2-4.2 5-4.2s5 1.6 5 4.2"/></svg>
+        <input data-f="user" placeholder="账号" value="${esc(empty ? "" : s.user)}">
+      </label>
+      <label class="ifield">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.2" y="7" width="9.6" height="6.2" rx="1.6"/><path d="M5.6 7V5.2a2.4 2.4 0 0 1 4.8 0V7"/></svg>
+        <input data-f="pass" type="text" autocomplete="off" spellcheck="false"
+               placeholder="${hasPass ? "读取中…" : "密码"}"
+               value="" data-haspass="${hasPass ? "1" : "0"}">
+      </label>
+      <label class="ifield full">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3h9v6.2l-3.3 3.3H3.5z"/><path d="M12.5 9.2H9.2v3.3"/></svg>
+        <input data-f="remark" placeholder="备注" value="${esc(empty ? "" : s.remark)}">
+      </label>
     </div>
   </div>`;
 }
