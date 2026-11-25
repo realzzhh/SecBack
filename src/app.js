@@ -733,6 +733,9 @@ function openEditor(p) {
   }
 
   $("overlay").hidden = false;
+  const modal = $("overlay").querySelector(".modal");
+  // 显示后再量标题栏，让吸顶操作栏紧贴下方。
+  modal.style.setProperty("--head-h", modal.querySelector(".modal-head").offsetHeight + "px");
   setTimeout(() => $("m-name").focus(), 30);
 }
 

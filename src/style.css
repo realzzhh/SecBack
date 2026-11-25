@@ -2020,3 +2020,80 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 .slot-edit:not(.expanded) .slot-edit-head {
   margin-bottom: 0;
 }
+
+/* ============================================================
+   编辑弹层第四轮微调（2026-11-25）
+   ============================================================ */
+
+/* ---- 分组做成真正的面板 ---- */
+.form-panel {
+  margin-bottom: 14px;
+  padding: 14px 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .012);
+}
+
+.form-panel:last-child { margin-bottom: 4px; }
+
+[data-theme="dark"] .form-panel {
+  background: rgba(255, 255, 255, .022);
+}
+
+/* 分组标题放大：原来 11px 太小，跟正文分不开 */
+.form-panel .form-group {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--text-2);
+  text-transform: none;
+}
+
+@media (max-width: 700px) {
+  /* 键盘弹起时使用实际可视高度，只让表单内容滚动。
+     避免 WebView 为底部输入框平移整页，把顶部操作栏带出视口。 */
+  #overlay {
+    height: var(--vvh, 100%);
+    bottom: auto;
+  }
+
+  #overlay .modal {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  #overlay .modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* 标题栏和操作栏粘在顶部：往下滑内容时它们不动，
+     否则"保存/取消"会跟着滚出去，得滑回顶部才点得到。 */
+  .modal-head {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--panel);
+    /* 下面那条分隔线在粘住时才需要，避免和内容糊在一起 */
+    border-bottom: 1px solid var(--line);
+  }
+
+  .modal-foot {
+    position: sticky;
+    /* --head-h 由 JS 在打开时量一次写进来，写死数值在字体变化时会错位 */
+    top: var(--head-h, 56px);
+    z-index: 5;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* body 顶部不再需要额外留白，滚动时内容从操作栏下方穿过 */
+  .modal-body {
+    padding-top: 4px;
+  }
+}
