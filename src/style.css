@@ -1899,3 +1899,124 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 }
 
 .slot-edit-head .clear:hover { color: var(--danger); }
+
+/* ============================================================
+   编辑表单：分组 + 折叠 + 动态增删（2026-11-25）
+   ============================================================ */
+
+/* 分组标题：把"项目"和"账户"分成两块，别让九个输入框糊在一起 */
+.form-group {
+  margin: 20px 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.form-group:first-child { margin-top: 2px; }
+
+/* ---- 槽标题做成可点击的折叠条 ---- */
+.slot-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.slot-toggle .chev {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--muted);
+  transition: transform .16s ease;
+}
+
+/* 展开时箭头转 90 度，一眼看出状态 */
+.slot-edit.expanded .chev { transform: rotate(90deg); }
+
+.slot-toggle .slot-name { font-weight: 600; }
+
+/* 收起时右侧显示"里面填了什么"的摘要 */
+.slot-toggle .slot-summary {
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 11.5px;
+  font-style: normal;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42%;
+}
+
+/* ---- 删除这个账户 ---- */
+.slot-remove {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.slot-remove:hover,
+.slot-remove:active {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ---- 添加账户 ---- */
+.add-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 12px;
+  margin-top: 2px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.add-slot svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+}
+
+.add-slot:hover {
+  background: var(--accent-weak);
+  border-color: var(--accent-line);
+}
+
+/* 收起状态下卡片薄一点，展开时才撑开 */
+.slot-edit:not(.expanded) {
+  padding-bottom: 10px;
+}
+
+.slot-edit:not(.expanded) .slot-edit-head {
+  margin-bottom: 0;
+}

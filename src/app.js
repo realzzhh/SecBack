@@ -45,6 +45,8 @@ let secrets = {};
 // renderDetail 看到 selected 还在就把详情又显示出来了（K90 上就是这个 bug）。
 let wantDetail = false;          // "id:slot" -> 明文密码（详情页"显示"用，临时）
 let editingId = null;      // null 表示新增
+let editSlotCount = 1;     // 编辑弹层里显示几个账户槽（1~3，密库格式固定 3 个）
+let expandedSlot = 0;      // 当前展开的是哪个槽，其余的收起来
 let impData = null;        // 导入预览的临时状态
 
 // 编辑弹层专用的 reveal 请求指纹。它和详情页的"显示"走同一条消息，
@@ -654,18 +656,26 @@ document.addEventListener("keydown", e => {
 
 // ------------------------------------------------------------------ 编辑弹层
 
-function slotEditHtml(i, s) {
+function slotEditHtml(i, s, expanded, removable) {
   const empty = !s || s.empty;
   const hasPass = !empty && s.hasPass;
+  // 收起时用一行摘要代替三个输入框，避免"九个框堆一起"的压迫感
+  const summary = empty ? "" : (s.user ? esc(s.user) : "未填账号");
 
   // 密码直接显示原文：打开弹层时单独取一次（见 openEditor）。
   // 框里先空着并提示"读取中…"，拿到之前用户要是已经动手输入，就不再覆盖。
-  return `<div class="slot-edit" data-slot="${i}">
+  return `<div class="slot-edit${expanded ? " expanded" : ""}" data-slot="${i}">
     <div class="slot-edit-head">
-      <span>账户 ${i + 1}${hasPass ? ' <em class="has-pass">已设置密码</em>' : ""}</span>
+      <button class="slot-toggle" type="button" data-toggle="${i}">
+        <svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+        <span class="slot-name">账户 ${i + 1}</span>
+        ${hasPass ? '<em class="has-pass">已设置密码</em>' : ""}
+        ${!expanded && summary ? `<em class="slot-summary">${summary}</em>` : ""}
+      </button>
       <button class="clear" data-clear="${i}">清空</button>
+      ${removable ? `<button class="slot-remove" data-remove="${i}" aria-label="删除这个账户">✕</button>` : ""}
     </div>
-    <div class="grid">
+    <div class="grid"${expanded ? "" : " hidden"}>
       <label class="ifield">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.2" r="2.6"/><path d="M3 13.4c0-2.6 2.2-4.2 5-4.2s5 1.6 5 4.2"/></svg>
         <input data-f="user" placeholder="账号" value="${esc(empty ? "" : s.user)}">
@@ -684,14 +694,32 @@ function slotEditHtml(i, s) {
   </div>`;
 }
 
+// 按当前计数重画槽列表。只在"打开弹层"时调用一次——
+// 增删槽走的是 DOM 增删（见下面的事件），不重画，否则已填的内容会丢。
+function renderSlotsEdit(p) {
+  let html = "";
+  for (let i = 0; i < editSlotCount; i++) {
+    html += slotEditHtml(i, p ? p.slots[i] : null, i === expandedSlot, editSlotCount > 1);
+  }
+  if (editSlotCount < 3) {
+    html += `<button class="add-slot" type="button" data-add="1">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
+      添加账户
+    </button>`;
+  }
+  $("m-slots").innerHTML = html;
+}
+
 function openEditor(p) {
   editingId = p ? p.id : null;
   $("modal-title").textContent = p ? "编辑项目" : "新增项目";
   $("m-name").value = p ? p.name : "";
   $("m-remark").value = p ? p.remark : "";
-  $("m-slots").innerHTML = [0, 1, 2]
-    .map(i => slotEditHtml(i, p ? p.slots[i] : null))
-    .join("");
+  // 只显示实际有内容的槽（至少 1 个），不再固定摆三个空壳
+  const filled = p ? p.slots.filter(x => x && !x.empty).length : 0;
+  editSlotCount = Math.max(1, Math.min(3, filled));
+  expandedSlot = 0;
+  renderSlotsEdit(p);
 
   // 已有密码的槽：按需取一次明文，填进输入框。
   // 走和详情页"显示"同一条消息，但记在 editReveals 里，收到后只填框、不进缓存。
@@ -723,14 +751,103 @@ $("overlay").addEventListener("click", e => {
 });
 
 $("m-slots").addEventListener("click", e => {
-  const btn = e.target.closest("button[data-clear]");
-  if (!btn) return;
-  const box = btn.closest(".slot-edit");
-  box.querySelectorAll("input").forEach(inp => {
-    inp.value = "";
-    inp.dataset.mask = "0";
-  });
+  // 清空
+  const clearBtn = e.target.closest("button[data-clear]");
+  if (clearBtn) {
+    const box = clearBtn.closest(".slot-edit");
+    box.querySelectorAll("input").forEach(inp => {
+      inp.value = "";
+      inp.dataset.mask = "0";
+    });
+    return;
+  }
+
+  // 展开 / 收起：同时只展开一个，其余自动收起
+  const toggle = e.target.closest("button[data-toggle]");
+  if (toggle) {
+    const idx = Number(toggle.dataset.toggle);
+    if (expandedSlot === idx && document.querySelector(".slot-edit.expanded")) {
+      // 已经展开就允许收起（全部收起也合法，方便快速扫一眼）
+      expandedSlot = -1;
+    } else {
+      expandedSlot = idx;
+    }
+    syncSlotExpansion();
+    return;
+  }
+
+  // 添加账户
+  if (e.target.closest("[data-add]")) {
+    if (editSlotCount >= 3) return;
+    const idx = editSlotCount;
+    editSlotCount++;
+    expandedSlot = idx;
+    const addBtn = $("m-slots").querySelector("[data-add]");
+    const holder = document.createElement("div");
+    holder.innerHTML = slotEditHtml(idx, null, true, true);
+    const node = holder.firstElementChild;
+    addBtn.parentNode.insertBefore(node, addBtn);
+    syncSlotExpansion();
+    if (editSlotCount >= 3) addBtn.remove();
+    // 新槽自动获得焦点，省一次点击
+    setTimeout(() => node.querySelector('[data-f="user"]').focus(), 30);
+    return;
+  }
+
+  // 删除账户：把后面的内容整体前移，再移除最后一个 DOM 节点。
+  // 这样不用重画整个列表，已填的内容一个都不会丢。
+  const rm = e.target.closest("button[data-remove]");
+  if (rm) {
+    if (editSlotCount <= 1) return;
+    const boxes = [...$("m-slots").querySelectorAll(".slot-edit")];
+    const idx = Number(rm.dataset.remove);
+    for (let i = idx; i < boxes.length - 1; i++) {
+      const from = boxes[i + 1], to = boxes[i];
+      for (const f of ["user", "pass", "remark"]) {
+        const a = to.querySelector(`[data-f="${f}"]`);
+        const b = from.querySelector(`[data-f="${f}"]`);
+        a.value = b.value;
+        if (b.dataset.haspass) a.dataset.haspass = b.dataset.haspass;
+        if (from.dataset.originalPass !== undefined) {
+          to.dataset.originalPass = from.dataset.originalPass;
+        }
+      }
+      to.dataset.originalPass = from.dataset.originalPass;
+      if (from.dataset.originalPass === undefined) delete to.dataset.originalPass;
+    }
+    boxes[boxes.length - 1].remove();
+    editSlotCount--;
+    if (expandedSlot >= idx) expandedSlot = Math.max(0, expandedSlot - 1);
+    // 槽位下标要重排，否则 data-slot 和实际顺序对不上
+    [...$("m-slots").querySelectorAll(".slot-edit")].forEach((box, i) => {
+      box.dataset.slot = String(i);
+      box.querySelectorAll("button[data-toggle]").forEach(b => b.dataset.toggle = String(i));
+      box.querySelectorAll("button[data-clear]").forEach(b => b.dataset.clear = String(i));
+      box.querySelectorAll("button[data-remove]").forEach(b => b.dataset.remove = String(i));
+      box.querySelector(".slot-name").textContent = `账户 ${i + 1}`;
+    });
+    // 少了一个槽，把"添加账户"按钮补回来
+    if (editSlotCount < 3 && !$("m-slots").querySelector("[data-add]")) {
+      const btn = document.createElement("button");
+      btn.className = "add-slot";
+      btn.type = "button";
+      btn.dataset.add = "1";
+      btn.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>添加账户`;
+      $("m-slots").appendChild(btn);
+    }
+    syncSlotExpansion();
+  }
 });
+
+// 按 expandedSlot 同步每个槽的展开状态（不重画，只切 class 和 hidden）
+function syncSlotExpansion() {
+  $("m-slots").querySelectorAll(".slot-edit").forEach(box => {
+    const i = Number(box.dataset.slot);
+    const on = i === expandedSlot;
+    box.classList.toggle("expanded", on);
+    box.querySelector(".grid").hidden = !on;
+  });
+}
 
 // 用户一旦手动改过密码框，异步回来的原密码就不再覆盖它
 $("m-slots").addEventListener("input", e => {
@@ -759,8 +876,14 @@ $("modal-save").addEventListener("click", () => {
     $("q").value = "";
   }
 
+  // 界面上可能只有 1~2 个槽，但密库格式固定 3 个：
+  // 缺的那几个提交空槽，宿主侧不用改。
   for (let i = 0; i < 3; ++i) {
     const box = $("m-slots").querySelector(`.slot-edit[data-slot="${i}"]`);
+    if (!box) {
+      msg["s" + i] = { user: "", remark: "", pass: "" };
+      continue;
+    }
     const user = box.querySelector('[data-f="user"]').value.trim();
     const remark = box.querySelector('[data-f="remark"]').value.trim();
     const passInp = box.querySelector('[data-f="pass"]');
