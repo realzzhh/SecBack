@@ -1,10 +1,14 @@
 {
   "name": "secbacktauri",
-  "version": "1.0.0",
+  "version": "0.1.1",
+  "androidVersionCode": 1000002,
   "description": "",
   "main": "index.js",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:windows": "node scripts/build-windows.mjs",
+    "build:android": "node scripts/build-android.mjs",
+    "icons:generate": "node scripts/generate-icons.mjs"
   },
   "keywords": [],
   "author": "",

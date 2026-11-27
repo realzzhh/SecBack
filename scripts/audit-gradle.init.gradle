@@ -1,0 +1,27 @@
+allprojects {
+    tasks.register('secbackAuditCoordinates') {
+        doLast {
+            def scopes = []
+            rootProject.allprojects.each { p ->
+                def configs = p.configurations.findAll { c ->
+                    c.canBeResolved && (c.name.endsWith('RuntimeClasspath') || c.name.endsWith('CompileClasspath'))
+                }
+                configs += p.buildscript.configurations.findAll { it.canBeResolved && it.name == 'classpath' }
+                configs.each { c ->
+                    def packages = c.incoming.resolutionResult.allComponents.collect { it.moduleVersion }
+                        .findAll { it != null && it.group && it.group != 'unspecified' }
+                        .collect { [name: it.group + ':' + it.name, version: it.version] }
+                        .unique { it.name + '@' + it.version }.sort { it.name + '@' + it.version }
+                    // A resolution failure must fail the audit, never turn into a clean report.
+                    c.incoming.resolutionResult.allDependencies.each { d ->
+                        if (d instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) throw d.failure
+                    }
+                    scopes.add([project: p.path, configuration: c.name, packages: packages])
+                }
+            }
+            def target = rootProject.findProperty('secback.auditOutput')
+            if (!target) throw new GradleException('Set -Psecback.auditOutput=<absolute JSON path>')
+            new File(target.toString()).text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([schema:1, scopes:scopes]))
+        }
+    }
+}

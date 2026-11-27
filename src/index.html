@@ -2,35 +2,46 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<meta name="secback-ui-revision" content="20261127-polish-0.1.1">
 <!-- viewport-fit=cover 是 env(safe-area-inset-*) 生效的前提：
      不加这行，刘海屏/状态栏的留白全是 0，顶部工具栏会被状态栏压住。
      interactive-widget=resizes-content 让软键盘弹起时缩小布局视口，
      否则 100vh 不变，弹层底部会被键盘盖住（Android 15 强制 edge-to-edge 后
-     Manifest 的 adjustResize 已经不管用了）。
-     maximum-scale 和 user-scalable 关掉双击缩放。 -->
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+     Manifest 的 adjustResize 已经不管用了）。保留用户缩放能力。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>SecBack</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+<!-- Windows 使用主题菜单；标题栏与系统窗口操作保持原生。 -->
+<header id="desktop-chrome" class="desktop-chrome" aria-label="应用菜单">
+  <div class="desktop-brand"><img src="assets/app-icon.svg" alt="" width="28" height="28"><span>SecBack</span><span class="brand-caption">本地密码本</span></div>
+  <nav id="desktop-menubar" role="menubar" aria-label="主菜单"></nav>
+  <span class="desktop-local">本地存储 · 加密保护</span>
+</header>
+
 <!-- 登录视图：和主界面同一个 WebView，登录成功后切走 -->
 <div id="login" class="login">
   <div class="login-card">
     <div class="login-mark">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8.5 10V7a3.5 3.5 0 0 1 7 0v3"/></svg>
+      <img src="assets/app-icon.svg" width="64" height="64" alt="">
     </div>
     <h1 class="login-title">SecBack</h1>
     <p class="login-sub">本地密码本</p>
 
-    <!-- inputmode="numeric"：点进来直接弹数字键盘（主密码是数字）。
+    <!--：点进来直接弹数字键盘（主密码是数字）。
          之前以为它导致黑屏，其实那是 MIUI 对密码框的截屏保护——
          App 一直是好的，只是截出来的图是黑的。 -->
-    <input id="login-pwd" class="login-input" type="password" inputmode="numeric"
-           placeholder="主密码" autocomplete="off" spellcheck="false">
+    <div class="login-password-field">
+      <input id="login-pwd" class="login-input" type="password" inputmode="numeric"
+             placeholder="主密码" aria-label="主密码" autocomplete="off" spellcheck="false">
+      <button id="login-visible" class="password-visibility" type="button" aria-label="显示主密码" aria-pressed="false"></button>
+    </div>
+    <input id="login-confirm" class="login-input" type="password" placeholder="再次输入主密码（创建密库）" aria-label="确认新主密码" autocomplete="new-password" hidden>
     <button id="login-go" class="login-btn">进 入</button>
 
-    <p id="login-hint" class="login-hint"></p>
+    <p id="login-hint" class="login-hint" role="status" aria-live="polite"></p>
 
     <button id="btn-recover" class="link-btn">主密码忘了？用恢复码打开</button>
   </div>
@@ -69,13 +80,14 @@
     <button class="tool" id="btn-lock" title="锁定">
       <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>
     </button>
+    <button class="tool" id="btn-more" aria-label="更多设置">更多</button>
   </header>
 
   <!-- 左列表 + 右详情 -->
   <div class="body">
 
     <aside class="sidebar">
-      <div class="list" id="list"></div>
+      <div class="list" id="list" role="listbox" aria-label="项目列表"></div>
       <div class="empty" id="list-empty" hidden>
         <div class="empty-title">还没有项目</div>
         <!-- 手机上是底部操作栏，桌面才是右上角的工具栏按钮。
@@ -113,9 +125,10 @@
           <span class="pane-head-gap" aria-hidden="true"></span>
         </div>
 
-        <div class="slots" id="slots"></div>
-
-        <div class="meta" id="p-meta"></div>
+        <div class="pane-content">
+          <div class="slots" id="slots"></div>
+          <div class="meta" id="p-meta"></div>
+        </div>
 
         <!-- 编辑/删除挪到详情页最底部（P10 反馈：放头上不顺手）。
              手机上「删除」在左占 1/4，「编辑」在右占 3/4。 -->
@@ -154,7 +167,7 @@
 <!-- 「更多」抽屉：放不常用的功能。
      sheet 从底部滑上来，比弹层更贴近手机习惯。 -->
 <div class="overlay" id="sheet" hidden>
-  <div class="sheet" role="dialog" aria-modal="true">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="更多设置">
     <div class="sheet-grip"></div>
     <button class="sheet-item" id="sheet-export" type="button">导出加密备份</button>
     <p id="backup-status" class="backup-status" aria-live="polite"></p>
@@ -168,7 +181,7 @@
 
 <!-- 新增 / 编辑弹层 -->
 <div class="overlay" id="overlay" hidden>
-  <div class="modal" role="dialog" aria-modal="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal-head">
       <h2 id="modal-title">新增项目</h2>
       <button class="icon-btn" id="modal-x" title="关闭">
@@ -206,9 +219,9 @@
 
 <!-- 危险操作确认。删除是不可逆的，必须先问一句 -->
 <div class="overlay" id="confirm" hidden>
-  <div class="modal narrow" role="dialog" aria-modal="true">
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="dialog-title-1">
     <div class="modal-head">
-      <h2>删除项目</h2>
+      <h2 id="dialog-title-1">删除项目</h2>
     </div>
     <div class="modal-body">
       <p class="confirm-text">确定删除「<b id="confirm-name"></b>」吗？</p>
@@ -223,9 +236,9 @@
 
 <!-- 导入：输对方机器的密码 -->
 <div class="overlay" id="ipwd" hidden>
-  <div class="modal narrow" role="dialog" aria-modal="true">
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="dialog-title-2">
     <div class="modal-head">
-      <h2>导入密库</h2>
+      <h2 id="dialog-title-2">导入密库</h2>
     </div>
     <div class="modal-body">
       <p class="confirm-text">请输入 <b id="ipwd-file"></b> 的主密码</p>
@@ -244,12 +257,9 @@
 
 <!-- 导入：预览与勾选 -->
 <div class="overlay" id="imp" hidden>
-  <div class="modal wide" role="dialog" aria-modal="true">
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="dialog-title-3">
     <div class="modal-head">
-      <h2>导入预览</h2>
-      <button class="icon-btn" id="imp-x" title="关闭">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-      </button>
+      <h2 id="dialog-title-3">导入预览</h2>
     </div>
     <div class="modal-body imp-body">
       <p class="imp-src">来自 <b id="imp-file"></b></p>
@@ -265,9 +275,9 @@
 
 <!-- 修改主密码 -->
 <div class="overlay" id="pwd" hidden>
-  <div class="modal narrow" role="dialog" aria-modal="true">
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="dialog-title-4">
     <div class="modal-head">
-      <h2>修改主密码</h2>
+      <h2 id="dialog-title-4">修改主密码</h2>
     </div>
     <div class="modal-body">
       <label class="field">
@@ -294,9 +304,9 @@
 
 <!-- 设置恢复码：先验证当前密码 -->
 <div class="overlay" id="recpwd" hidden>
-  <div class="modal narrow" role="dialog" aria-modal="true">
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="dialog-title-5">
     <div class="modal-head">
-      <h2>设置恢复码</h2>
+      <h2 id="dialog-title-5">设置恢复码</h2>
     </div>
     <div class="modal-body">
       <p class="confirm-text">先输入当前主密码，确认是本人操作。</p>
@@ -315,9 +325,9 @@
 
 <!-- 恢复码展示 + 抄写确认 -->
 <div class="overlay" id="reccode" hidden>
-  <div class="modal" role="dialog" aria-modal="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title-6">
     <div class="modal-head">
-      <h2>恢复码</h2>
+      <h2 id="dialog-title-6">恢复码</h2>
     </div>
     <div class="modal-body">
       <p class="confirm-text">这串码可以代替主密码打开这个密库。<b>请抄在纸上，和电脑分开保管。</b></p>
@@ -344,9 +354,9 @@
 
 <!-- 用恢复码打开 -->
 <div class="overlay" id="recover" hidden>
-  <div class="modal" role="dialog" aria-modal="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title-7">
     <div class="modal-head">
-      <h2>用恢复码打开</h2>
+      <h2 id="dialog-title-7">用恢复码打开</h2>
     </div>
     <div class="modal-body">
       <p class="confirm-text">输入当初抄下来的恢复码。大小写和短横都不计较，空格也行。</p>
@@ -365,9 +375,9 @@
 
 <!-- 恢复成功后设新密码 -->
 <div class="overlay" id="recnew" hidden>
-  <div class="modal narrow" role="dialog" aria-modal="true">
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="dialog-title-8">
     <div class="modal-head">
-      <h2>设置新主密码</h2>
+      <h2 id="dialog-title-8">设置新主密码</h2>
     </div>
     <div class="modal-body">
       <p class="confirm-text">已经用恢复码解开了。现在设一个新密码，以后就用它进入。</p>
@@ -389,7 +399,14 @@
   </div>
 </div>
 
-<div class="toasts" id="toasts"></div>
+<div class="overlay" id="discard" hidden>
+  <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="discard-title">
+    <div class="modal-head"><h2 id="discard-title">放弃未保存的修改？</h2></div>
+    <div class="modal-body">当前输入尚未保存，放弃后将清除。</div>
+    <div class="modal-foot"><button class="btn ghost" id="discard-cancel">继续编辑</button><button class="btn danger" id="discard-ok">放弃修改</button></div>
+  </div>
+</div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
 <script src="app.js"></script>
 </body>

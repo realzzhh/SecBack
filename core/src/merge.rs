@@ -7,6 +7,7 @@
 //! 靠的是溢出副本的 id 由 (对方项目 id, 组号) 确定性派生，而不是随机生成。
 
 use crate::format::{Account, Project, ProjectId, MAX_SLOTS};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeAction {
@@ -41,6 +42,7 @@ pub struct MergeEntry {
     /// 是否靠"同名"匹配上的（而非 id）
     pub same_name: bool,
     pub slots: Vec<MergeSlot>,
+    pub metadata_conflict: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -51,6 +53,7 @@ pub struct MergeOptions {
     pub skip_projects: Vec<ProjectId>,
     /// 被取消勾选的账户。
     pub exclude_slots: Vec<(ProjectId, u8)>,
+    pub use_incoming_metadata: Vec<ProjectId>,
 }
 
 impl MergeOptions {
@@ -74,6 +77,7 @@ pub struct MergeResult {
     pub overflow_count: i32,
     /// 实际新增的账户数
     pub slots_added: i32,
+    pub metadata_changed: i32,
 }
 
 /// 由 base + 组号确定性地派生一个副本 id。
@@ -135,7 +139,8 @@ pub fn merge(local: &[Project], incoming: &[Project], opt: &MergeOptions) -> Mer
 
     // 只有【原有项目】能被匹配到。本次导入刚新增的项目不能当匹配目标，
     // 否则对方两个同名项目会被揉成一条，而它们本来是两条不同的记录。
-    let base_count = local.len();
+    let mut ids = HashMap::new(); let mut names = HashMap::new();
+    for (i,p) in local.iter().enumerate() { ids.entry(p.id).or_insert(i); names.entry(trim_name(&p.name)).or_insert(i); }
 
     for src in incoming {
         let mut e = MergeEntry {
@@ -146,15 +151,16 @@ pub fn merge(local: &[Project], incoming: &[Project], opt: &MergeOptions) -> Mer
             copies: 0,
             same_name: false,
             slots: Vec::new(),
+            metadata_conflict: false,
         };
 
         // ---- 1. 找到本机对应项目 ----
-        let mut local_idx: Option<usize> = (0..base_count).find(|i| local[*i].id == src.id);
+        let mut local_idx: Option<usize> = ids.get(&src.id).copied();
 
         if local_idx.is_none() && opt.merge_same_name.contains(&src.id) {
             let want = trim_name(&src.name);
             if !want.is_empty() {
-                if let Some(i) = (0..base_count).find(|i| trim_name(&local[*i].name) == want) {
+                if let Some(i) = names.get(want).copied() {
                     local_idx = Some(i);
                     e.same_name = true;
                 }
@@ -202,6 +208,16 @@ pub fn merge(local: &[Project], incoming: &[Project], opt: &MergeOptions) -> Mer
             e.local_index = dst_idx as i32;
         }
 
+        if !is_new {
+            let dst = &mut r.merged[dst_idx];
+            e.metadata_conflict = dst.name != src.name || dst.remark != src.remark;
+            if opt.use_incoming_metadata.contains(&src.id) && e.metadata_conflict {
+                dst.name = src.name.clone(); dst.remark = src.remark.clone();
+                dst.created_utc = src.created_utc; dst.modified_utc = src.modified_utc;
+                r.metadata_changed += 1;
+            }
+        }
+        let slots_before = r.slots_added;
         // ---- 5. 逐账户落位：先判重，再找空槽 ----
         let mut overflow: Vec<Account> = Vec::new();
         for ms in e.slots.iter_mut() {
@@ -277,6 +293,7 @@ pub fn merge(local: &[Project], incoming: &[Project], opt: &MergeOptions) -> Mer
             group += 1;
         }
 
+        if r.slots_added > slots_before { r.merged[dst_idx].modified_utc = r.merged[dst_idx].modified_utc.max(src.modified_utc); }
         if is_new {
             r.added += 1;
         } else {
@@ -501,4 +518,16 @@ mod tests {
         let r = merge(&local, &incoming, &opt);
         assert_eq!(r.merged.len(), 1, "全角空格和半角空格都要能被裁掉");
     }
+}
+
+#[cfg(test)] mod metadata_tests {
+ use super::*;
+ #[test] fn metadata_only_changes_require_choice_and_are_idempotent(){
+  let mut a=Project::new_with_id([1;16]);a.name="本机".into();a.remark="保留".into();
+  let mut b=a.clone();b.name="外部".into();b.remark="更新".into();b.modified_utc+=10;
+  let keep=merge(&[a.clone()],&[b.clone()],&MergeOptions::default());assert!(keep.entries[0].metadata_conflict);assert_eq!(keep.merged[0].name,"本机");
+  let opt=MergeOptions{use_incoming_metadata:vec![b.id],..Default::default()};
+  let use_source=merge(&[a],&[b.clone()],&opt);assert_eq!(use_source.metadata_changed,1);assert_eq!(use_source.merged[0].remark,"更新");
+  let again=merge(&use_source.merged,&[b],&opt);assert_eq!(again.metadata_changed,0);
+ }
 }

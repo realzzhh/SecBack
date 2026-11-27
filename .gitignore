@@ -65,3 +65,19 @@ src-tauri/gen/android/buildSrc/build/
 
 # 发布签名证书：含私钥和密码，绝不能入库
 /keystore/
+
+# 发布物及其校验清单保留在本机交付目录，不进入源码提交。
+/delivery/**/*.apk
+*.properties.bak*
+*.properties.lock
+*.tmp-*
+
+# Non-secret Gradle build settings are required by a clean checkout.
+!src-tauri/gen/android/gradle.properties
+!src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties
+
+# APK 校验清单随安装包交付，属于构建结果。
+/delivery/**/*.manifest.json
+
+# 个人本机清理脚本，保留文件但不提交。
+/清理剩余构建缓存.ps1

@@ -1,4 +1,4 @@
-//! 磁盘格式：64 字节明文头 + AES-GCM 密文负载。
+//! 磁盘格式：v1 为 64 字节头，v2 为 256 字节头，后接 AES-GCM 密文负载。
 //!
 //! 这个文件是 `docs/SecBack_格式契约.md` 的 Rust 实现。任何改动都必须同步
 //! 那份文档，并且能过 `tests/vectors.rs` 的逐字节对拍——否则 PC 端和手机端
@@ -11,7 +11,7 @@ pub const MAGIC: [u8; 8] = [b'S', b'E', b'C', b'B', b'K', 0x00, 0x01, 0x00];
 /// v1：64 字节头，密钥直接由口令派生。
 pub const HEADER_SIZE_V1: usize = 64;
 /// v2：256 字节头。多了一个随机数据密钥（DEK），被口令和恢复码各包一份。
-/// 口令忘了可以用恢复码解出 DEK，不用重新加密整个库。
+/// 恢复码可解出 DEK；当前保存流程仍会重写整个加密文件。
 pub const HEADER_SIZE_V2: usize = 256;
 
 /// 老代码按 64 字节的头算偏移，v1 路径继续用它。
@@ -22,6 +22,9 @@ pub const FORMAT_VERSION_V2: u16 = 2;
 
 pub const MAX_SLOTS: usize = 3;
 pub const MAX_PROJECTS: u32 = 100_000;
+pub const MAX_FIELD_BYTES: usize = 1024 * 1024;
+pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_ITERATIONS: u32 = 2_000_000;
 
 /// 数据加密密钥长度（AES-256）。
 pub const DEK_LEN: usize = 32;
@@ -229,13 +232,14 @@ impl Header {
             buf[OFF_ITERATIONS + 2],
             buf[OFF_ITERATIONS + 3],
         ]);
-        if iterations == 0 {
+        if iterations == 0 || iterations > MAX_ITERATIONS {
             return Err(ParseError::Corrupt);
         }
 
         let mut ps = [0u8; 8];
         ps.copy_from_slice(&buf[OFF_PAYLOAD..OFF_PAYLOAD + 8]);
         let payload_size = u64::from_le_bytes(ps);
+        if payload_size > (MAX_PAYLOAD_BYTES + 16) as u64 { return Err(ParseError::Corrupt); }
 
         let mut h = Header {
             version,
@@ -295,6 +299,27 @@ fn put_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
 }
 
+/// 对外部输入和写盘采用相同限制，先计数再分配。
+pub fn serialized_size(projects: &[Project]) -> Result<usize, ParseError> {
+    if projects.len() > MAX_PROJECTS as usize { return Err(ParseError::Corrupt); }
+    let mut size = 4usize;
+    for p in projects {
+        size = size.checked_add(36).ok_or(ParseError::Corrupt)?;
+        for value in std::iter::once(&p.name).chain(std::iter::once(&p.remark))
+            .chain(p.slots.iter().flat_map(|a| [&a.user, &a.pass, &a.remark])) {
+            if value.len() > MAX_FIELD_BYTES { return Err(ParseError::Corrupt); }
+            size = size.checked_add(4 + value.len()).ok_or(ParseError::Corrupt)?;
+            if size > MAX_PAYLOAD_BYTES { return Err(ParseError::Corrupt); }
+        }
+    }
+    Ok(size)
+}
+
+pub fn try_serialize(projects: &[Project]) -> Result<Vec<u8>, ParseError> {
+    serialized_size(projects)?;
+    Ok(serialize(projects))
+}
+
 pub fn serialize(projects: &[Project]) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + projects.len() * 128);
     put_u32(&mut out, projects.len() as u32);
@@ -315,9 +340,10 @@ pub fn serialize(projects: &[Project]) -> Vec<u8> {
 }
 
 pub fn deserialize(data: &[u8]) -> Result<Vec<Project>, ParseError> {
+    if data.len() > MAX_PAYLOAD_BYTES { return Err(ParseError::Corrupt); }
     let mut r = Reader::new(data);
     let count = r.u32()?;
-    if count > MAX_PROJECTS {
+    if count > MAX_PROJECTS || count as usize > data.len().saturating_sub(4) / 80 {
         return Err(ParseError::Corrupt);
     }
 
@@ -391,7 +417,7 @@ impl<'a> Reader<'a> {
     fn string(&mut self) -> Result<String, ParseError> {
         let n = self.u32()? as usize;
         // 上限保护：防止构造出的超大长度导致内存爆炸
-        if n > 64 * 1024 * 1024 {
+        if n > MAX_FIELD_BYTES {
             return Err(ParseError::Corrupt);
         }
         let bytes = self.take(n)?;
@@ -617,4 +643,19 @@ mod tests {
         assert_eq!(&bytes[16..32], &[3u8; 16]);
         assert_eq!(&bytes[48..56], &100u64.to_le_bytes());
     }
+}
+
+#[cfg(test)] mod limit_tests {
+ use super::*;
+ #[test] fn rejects_expensive_header_and_overflow_size(){
+  let mut h=Header::default();h.iterations=u32::MAX;assert!(Header::parse(&h.encode()).is_err());
+  h.iterations=1000;h.payload_size=u64::MAX;assert!(Header::parse(&h.encode()).is_err());
+ }
+ #[test] fn symmetric_field_and_project_limits(){
+  let mut p=Project::new_with_id([1;16]);p.name="x".repeat(MAX_FIELD_BYTES);
+  let good=try_serialize(&[p.clone()]).unwrap();assert!(deserialize(&good).is_ok());
+  p.name.push('x');assert!(try_serialize(&[p]).is_err());
+  assert!(deserialize(&100_000u32.to_le_bytes()).is_err());
+  let many=vec![Project::new_with_id([1;16]);MAX_PROJECTS as usize+1];assert!(try_serialize(&many).is_err());
+ }
 }

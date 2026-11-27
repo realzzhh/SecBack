@@ -14,7 +14,8 @@ use crate::format::{
 };
 use std::fs;
 use zeroize::Zeroizing;
-use std::io::Write;
+use std::io::{Read, Write};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,8 @@ pub enum Err {
     CryptoFail,
     TooWeak,
     Locked,
+    Limit,
+    Conflict,
     /// 这个库没设恢复码
     NoRecovery,
     /// 恢复码不对
@@ -43,6 +46,8 @@ impl Err {
             Err::CryptoFail => "加密运算失败",
             Err::TooWeak => "密码不能为空",
             Err::Locked => "密库未解锁",
+            Err::Limit => "内容超过限制（最多十万项目、单字段 1 MiB、负载 64 MiB）",
+            Err::Conflict => "密库已被其他程序修改，请锁定后重新打开再操作",
             Err::NoRecovery => "这个密库没有设置恢复码",
             Err::BadRestoreCode => "恢复码不正确",
         }
@@ -88,6 +93,7 @@ pub struct Store {
     /// 每次 save 只更新 nonce 和 payload_size——这样保存时不需要口令。
     hdr: Header,
     unlocked: bool,
+    disk_hash: Option<[u8; 32]>,
 }
 
 impl Store {
@@ -101,15 +107,17 @@ impl Store {
                 ..Default::default()
             },
             unlocked: false,
+            disk_hash: None,
         }
     }
 
     /// 临时事务副本；失败时析构并擦除，成功时替换原对象。
     pub fn staged(&self) -> Self {
-        Self { projects: self.projects.clone(), key: self.key, hdr: self.hdr.clone(), unlocked: self.unlocked }
+        Self { projects: self.projects.clone(), key: self.key, hdr: self.hdr.clone(), unlocked: self.unlocked, disk_hash: self.disk_hash }
     }
 
     pub fn commit(&mut self, path: &Path, mut candidate: Self) -> Result<(), Err> {
+        if self.unlocked { candidate.disk_hash = self.disk_hash; }
         candidate.save(path)?;
         std::mem::swap(self, &mut candidate);
         Ok(())
@@ -142,6 +150,7 @@ impl Store {
         crypto::wipe(&mut self.key);
         crypto::wipe(&mut self.hdr.salt);
         self.unlocked = false;
+        self.disk_hash = None;
     }
 
     /// 文件不存在时用该口令创建空库；存在则正常校验。
@@ -185,12 +194,19 @@ impl Store {
             return Err(Err::TooWeak);
         }
 
-        let bytes = match fs::read(path) {
+        let bytes = match read_bounded(path) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Err::Missing),
             Err(_) => return Err(Err::Io),
         };
 
+        self.load_bytes(&bytes, password)
+    }
+
+    /// 从有界密文快照加载；移动文档 URI 不需要落盘或转换为路径。
+    fn load_bytes(&mut self, bytes: &[u8], password: &str) -> Result<(), Err> {
+        if password.is_empty() { return Err(Err::TooWeak); }
+        if bytes.len() > format::MAX_PAYLOAD_BYTES + 272 { return Err(Err::Limit); }
         if bytes.len() < HEADER_SIZE {
             return Err(Err::Corrupt);
         }
@@ -204,7 +220,7 @@ impl Store {
         }
 
         // payload_size 含 16 字节 tag；文件总长必须正好是 头长 + payload_size
-        let expect = hsize as u64 + h.payload_size;
+        let expect = (hsize as u64).checked_add(h.payload_size).ok_or(Err::Corrupt)?;
         if h.payload_size < TAG_LEN as u64 || expect != bytes.len() as u64 {
             return Err(Err::Corrupt);
         }
@@ -232,6 +248,7 @@ impl Store {
         self.key = *key;
         self.hdr = h;
         self.projects = projects;
+        self.disk_hash = Some(Sha256::digest(&bytes).into());
         self.unlocked = true;
         Ok(())
     }
@@ -240,20 +257,23 @@ impl Store {
         if !self.unlocked {
             return Err(Err::Locked);
         }
-        let plain = Zeroizing::new(format::serialize(&self.projects));
+        let plain = Zeroizing::new(format::try_serialize(&self.projects).map_err(|_| Err::Limit)?);
         let nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
         let blob = crypto::seal(&self.key, &nonce, &plain).map_err(|_| Err::CryptoFail)?;
 
         // 头模板原样带过去（v2 的两处 wrap 材料必须保留），只换 nonce 和长度
-        self.hdr.nonce = nonce;
-        self.hdr.payload_size = blob.len() as u64;
+        let mut header = self.hdr.clone();
+        header.nonce = nonce;
+        header.payload_size = blob.len() as u64;
 
-        let head = self.hdr.encode();
+        let head = header.encode();
         let mut out = Vec::with_capacity(head.len() + blob.len());
         out.extend_from_slice(&head);
         out.extend_from_slice(&blob);
 
-        write_atomic(path, &out)
+        self.write_checked(path, &out)?;
+        self.hdr = header;
+        Ok(())
     }
 
     /// 把【外部】列表写盘，不动内存里的 projects。
@@ -263,19 +283,22 @@ impl Store {
         if !self.unlocked {
             return Err(Err::Locked);
         }
-        let plain = Zeroizing::new(format::serialize(projects));
+        let plain = Zeroizing::new(format::try_serialize(projects).map_err(|_| Err::Limit)?);
         let nonce = crypto::random_fixed::<NONCE_LEN>().ok_or(Err::CryptoFail)?;
         let blob = crypto::seal(&self.key, &nonce, &plain).map_err(|_| Err::CryptoFail)?;
 
-        self.hdr.nonce = nonce;
-        self.hdr.payload_size = blob.len() as u64;
+        let mut header = self.hdr.clone();
+        header.nonce = nonce;
+        header.payload_size = blob.len() as u64;
 
-        let head = self.hdr.encode();
+        let head = header.encode();
         let mut out = Vec::with_capacity(head.len() + blob.len());
         out.extend_from_slice(&head);
         out.extend_from_slice(&blob);
 
-        write_atomic(path, &out)
+        self.write_checked(path, &out)?;
+        self.hdr = header;
+        Ok(())
     }
 
     /// 改主密码：换 salt + 新口令，整库重新加密落盘。
@@ -383,7 +406,7 @@ impl Store {
     /// 成功之后库是「已解锁但还没设新口令」的状态——紧接着必须调
     /// [`set_password`](Self::set_password)，否则下次还得再用恢复码。
     pub fn recover(&mut self, path: &Path, code: &str) -> Result<(), Err> {
-        let bytes = fs::read(path).map_err(|_| Err::Io)?;
+        let bytes = read_bounded(path).map_err(|_| Err::Io)?;
         let h = Header::parse(&bytes).map_err(|_| Err::Corrupt)?;
 
         // 先看这个库有没有恢复槽，再看码的格式——
@@ -394,7 +417,7 @@ impl Store {
 
         let norm = Zeroizing::new(restore::normalize(code).ok_or(Err::BadRestoreCode)?);
         let hsize = h.size();
-        if bytes.len() != hsize + h.payload_size as usize {
+        if (hsize as u64).checked_add(h.payload_size) != Some(bytes.len() as u64) {
             return Err(Err::Corrupt);
         }
 
@@ -413,6 +436,7 @@ impl Store {
         self.key = *key;
         self.hdr = h;
         self.projects = projects;
+        self.disk_hash = Some(Sha256::digest(&bytes).into());
         self.unlocked = true;
         Ok(())
     }
@@ -444,6 +468,30 @@ impl Store {
         self.commit(path, candidate)
     }
 
+    fn write_checked(&mut self, path: &Path, bytes: &[u8]) -> Result<(), Err> {
+        // OS 文件锁随进程退出释放；仅在比较和替换期间持有，避免交替覆盖。
+        let guard = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
+            .open(sidecar(path, ".lock")).map_err(|_| Err::Io)?;
+        guard.try_lock().map_err(|_| Err::Conflict)?;
+        let current = match read_bounded(path) {
+            Ok(b) => Some(Sha256::digest(b).into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => return Err(Err::Io),
+        };
+        if current != self.disk_hash { return Err(Err::Conflict); }
+        if let Some(_) = current {
+            // 保留最近三次成功替换前的加密版本；不包含明文。
+            for n in (1..3).rev() {
+                let from = sidecar(path, &format!(".bak{n}"));
+                if from.exists() { fs::copy(&from, sidecar(path, &format!(".bak{}", n+1))).map_err(|_| Err::Io)?; }
+            }
+            fs::copy(path, sidecar(path, ".bak1")).map_err(|_| Err::Io)?;
+        }
+        write_atomic(path, bytes)?;
+        self.disk_hash = Some(Sha256::digest(bytes).into());
+        Ok(())
+    }
+
     pub fn find_index(&self, id: &[u8; 16]) -> Option<usize> {
         self.projects.iter().position(|p| &p.id == id)
     }
@@ -472,6 +520,12 @@ impl Default for Store {
     }
 }
 
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
 /// 写 .tmp 再原子重命名。Windows 上 fs::rename 内部就是 MoveFileExW(REPLACE_EXISTING)。
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Err> {
     let mut tmp: PathBuf = path.as_os_str().to_os_string().into();
@@ -480,15 +534,32 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Err> {
     tmp.set_file_name(name);
 
     {
-        let mut f = fs::File::create(&tmp).map_err(|_| Err::Io)?;
-        f.write_all(bytes).map_err(|_| Err::Io)?;
-        f.sync_all().map_err(|_| Err::Io)?;
+        if tmp.exists() { return Err(Err::Io); }
+        let suffix = crypto::random_fixed::<16>().ok_or(Err::CryptoFail)?;
+        tmp.set_extension(format!("tmp-{:032x}", u128::from_le_bytes(suffix)));
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(|_| Err::Io)?;
+        if f.write_all(bytes).and_then(|_| f.sync_all()).is_err() {
+            drop(f); let _ = fs::remove_file(&tmp); return Err(Err::Io);
+        }
     }
 
     fs::rename(&tmp, path).map_err(|_| {
         let _ = fs::remove_file(&tmp);
         Err::Io
-    })
+    })?;
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() { let _ = fs::File::open(parent).and_then(|f| f.sync_all()); }
+    Ok(())
+}
+
+fn read_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
+    let max = (format::MAX_PAYLOAD_BYTES + 272) as u64;
+    let file = fs::File::open(path)?;
+    if file.metadata()?.len() > max { return Err(std::io::Error::other("密库文件过大")); }
+    let mut bytes = Vec::new();
+    file.take(max + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max { return Err(std::io::Error::other("密库文件过大")); }
+    Ok(bytes)
 }
 
 /// 只读文件头判断"能不能读"，不需要口令。
@@ -511,14 +582,24 @@ pub fn probe_file(path: &Path) -> ProbeInfo {
     };
     info.file_size = meta.len();
 
-    let bytes = match fs::read(path) {
-        Ok(b) => b,
-        Err(_) => {
-            info.status = ProbeStatus::Io;
-            return info;
-        }
-    };
+    if meta.len() > (format::MAX_PAYLOAD_BYTES + 272) as u64 { info.status = ProbeStatus::Corrupt; return info; }
+    let mut bytes = Vec::new();
+    if fs::File::open(path).and_then(|f| f.take(256).read_to_end(&mut bytes)).is_err() {
+        info.status = ProbeStatus::Io; return info;
+    }
 
+    probe_header(&bytes, info.file_size)
+}
+
+/// 对已经读取的密文快照预检，规则与文件预检完全相同。
+pub fn probe_bytes(bytes: &[u8]) -> ProbeInfo {
+    probe_header(bytes, bytes.len() as u64)
+}
+
+fn probe_header(bytes: &[u8], file_size: u64) -> ProbeInfo {
+    let mut info = ProbeInfo { status: ProbeStatus::Corrupt, version: 0,
+        iterations: 0, payload_size: 0, file_size };
+    if file_size > (format::MAX_PAYLOAD_BYTES + 272) as u64 { return info; }
     if bytes.len() < HEADER_SIZE {
         info.status = ProbeStatus::TooSmall;
         return info;
@@ -535,8 +616,8 @@ pub fn probe_file(path: &Path) -> ProbeInfo {
         Ok(h) => {
             info.iterations = h.iterations;
             info.payload_size = h.payload_size;
-            let expect = h.size() as u64 + h.payload_size;
-            if h.payload_size < TAG_LEN as u64 || expect != bytes.len() as u64 {
+            let expect = (h.size() as u64).checked_add(h.payload_size);
+            if h.payload_size < TAG_LEN as u64 || expect != Some(info.file_size) {
                 info.status = ProbeStatus::Corrupt;
             } else {
                 info.status = ProbeStatus::Ok;
@@ -568,6 +649,13 @@ pub fn load_from(path: &Path, password: &str) -> Result<Vec<Project>, Err> {
     Ok(projects)
 }
 
+/// 解密文档选择器读到的密文；不保存口令或明文临时文件。
+pub fn load_from_bytes(bytes: &[u8], password: &str) -> Result<Vec<Project>, Err> {
+    let mut store = Store::new();
+    store.load_bytes(bytes, password)?;
+    Ok(std::mem::take(&mut store.projects))
+}
+
 /// 生成一个随机项目 id。
 pub fn make_id() -> Option<[u8; 16]> {
     crypto::random_fixed::<16>()
@@ -579,6 +667,64 @@ mod tests {
     use crate::format::Account;
 
     // 这些回归只测事务，不测 KDF 强度；降低轮数让故障矩阵保持快速。
+    #[test]
+    fn document_snapshot_supports_v1_v2_and_rejects_bad_input() {
+        let path = tmp_path("document_snapshot");
+        let mut store = Store::new();
+        store.load_or_create(&path, "synthetic-import-password", true).unwrap();
+        let mut project = Project::new_with_id([42; 16]);
+        project.name = "Android-URI-import-test".into();
+        project.slots[0] = Account { user: "synthetic-user".into(), pass: "synthetic-secret".into(), remark: "".into() };
+        store.projects_mut().push(project);
+        store.hdr.iterations = 1000;
+        store.key = crypto::derive_key("synthetic-import-password", &store.hdr.salt, 1000);
+        store.save(&path).unwrap();
+        for version in [1, 2] {
+            if version == 2 { store.enable_recovery(&path, "synthetic-import-password").unwrap(); }
+            let bytes = fs::read(&path).unwrap();
+            assert_eq!(probe_bytes(&bytes).status, ProbeStatus::Ok);
+            assert_eq!(probe_bytes(&bytes).version, version);
+            assert_eq!(load_from_bytes(&bytes, "wrong").unwrap_err(), Err::BadPassword);
+            let projects = load_from_bytes(&bytes, "synthetic-import-password").unwrap();
+            assert_eq!(projects[0].slots[0].pass, "synthetic-secret");
+            assert_ne!(probe_bytes(&bytes[..bytes.len()-1]).status, ProbeStatus::Ok);
+            assert!(load_from_bytes(&bytes[..bytes.len()-1], "synthetic-import-password").is_err());
+            let mut bad = bytes.clone(); *bad.last_mut().unwrap() ^= 1;
+            assert!(load_from_bytes(&bad, "synthetic-import-password").is_err());
+            if let Ok(dir) = std::env::var("SECBACK_FIXTURE_DIR") {
+                fs::write(Path::new(&dir).join(format!("synthetic-v{version}.properties")), bytes).unwrap();
+            }
+        }
+        store.projects_mut()[0].remark = "Synthetic external metadata".into();
+        store.projects_mut()[0].slots[1] = Account { user: "synthetic-second".into(), pass: "synthetic-second-secret".into(), remark: "".into() };
+        store.save(&path).unwrap();
+        let bytes = fs::read(&path).unwrap();
+        assert_eq!(load_from_bytes(&bytes, "synthetic-import-password").unwrap()[0].slots[1].user, "synthetic-second");
+        if let Ok(dir) = std::env::var("SECBACK_FIXTURE_DIR") {
+            fs::write(Path::new(&dir).join("synthetic-conflict.properties"), bytes).unwrap();
+        }
+        assert_eq!(probe_bytes(b"not a vault").status, ProbeStatus::TooSmall);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sidecars_preserve_custom_extensions() {
+        assert_eq!(sidecar(Path::new("vault.custom"), ".bak1"), Path::new("vault.custom.bak1"));
+        assert_ne!(sidecar(Path::new("vault.custom"), ".lock"), sidecar(Path::new("vault.other"), ".lock"));
+    }
+
+    #[test]
+    fn concurrent_save_is_rejected_and_previous_versions_are_retained() {
+        let (mut a,path,_)=transaction_fixture("concurrent_p2");
+        let mut b=Store::new();b.load(&path,"old-password").unwrap();
+        a.projects[0].name="first".into();a.save(&path).unwrap();
+        b.projects[0].name="stale".into();assert_eq!(b.save(&path),Err(Err::Conflict));
+        assert_eq!(b.rekey(&path,"old-password","next-password"),Err(Err::Conflict));
+        let mut check=Store::new();check.load(&path,"old-password").unwrap();assert_eq!(check.projects[0].name,"first");
+        let backup=sidecar(&path,".bak1");check.load(&backup,"old-password").unwrap();assert_eq!(check.projects[0].name,"原项目");
+        let _=fs::remove_file(path);let _=fs::remove_file(backup);
+    }
+
     fn transaction_fixture(name: &str) -> (Store, PathBuf, PathBuf) {
         let path = tmp_path(name);
         let block = PathBuf::from(format!("{}.tmp", path.display()));

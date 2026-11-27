@@ -1,20 +1,32 @@
 package com.secback.vault
 
 import android.os.Bundle
+import android.os.Build
+import android.view.View
+import android.view.WindowManager
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
-  override fun onCreate(savedInstanceState: Bundle?) {
-    // 注意：这里**故意**不调用 enableEdgeToEdge()。
-    //
-    // Tauri 的模板默认会调它，让 WebView 铺满整个屏幕（包括状态栏底下）。
-    // 我们这套界面是按"有边距的文档流"设计的，不是沉浸式全屏，
-    // 全屏的后果是：状态栏的时间和电量被工具栏压住，
-    // 页面里的 100vh 把状态栏和导航栏也算进去，弹层底部超出屏幕。
-    //
-    // 让系统把内容区放在状态栏下方更合适。
-    //
-    // 另外 targetSdk 35+ 会强制 edge-to-edge，光不调这个函数还不够，
-    // 要配合 themes.xml 里的 windowOptOutEdgeToEdgeEnforcement。
-    super.onCreate(savedInstanceState)
-  }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Fit the native content to system bars on all target SDKs; IME remains handled by visualViewport.
+        val content = findViewById<android.view.View>(android.R.id.content)
+        // Vault entries must not become accounts in a separate system autofill store.
+        if (Build.VERSION.SDK_INT >= 26) {
+            content.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
+            content.importantForContentCapture = View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(content)
+    }
 }

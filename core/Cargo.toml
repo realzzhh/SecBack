@@ -19,3 +19,11 @@ opt-level = "s"
 lto = true
 strip = true
 panic = "abort"
+
+[features]
+dev-tools = []
+
+[[bin]]
+name = "peek"
+path = "src/bin/peek.rs"
+required-features = ["dev-tools"]

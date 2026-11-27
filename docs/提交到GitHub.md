@@ -1,60 +1,19 @@
-# 提交到 GitHub
+# 版本控制与发布
 
-本地已经完成 `git init` 和首次提交（分支 `main`），只差推到远端。
+## 提交范围
 
-## 1. 先在 GitHub 建空仓库
+提交 core、src、src-tauri 宿主及 Android 手工工程、scripts、tests、CI 配置和文档（包括保留迁移说明的 docs/archive）。提交 package-lock.json、Cargo.lock，以及非敏感的 Gradle 配置与 wrapper 版本／校验和。gen/android 是受维护源码，不能整体忽略或通过 android init 覆盖。自动生成 schema、Rust/Gradle 缓存、JNI .so 和 node_modules 不提交。图标 SVG、ICO、PNG、ICNS 及 Android 资源属于产品资源，即使通过脚本生成也应提交，保证拉取源码后可直接构建并保持各平台图标一致。
 
-网页上 **New repository**：
+keystore/、签名配置、真实 secback.cfg、密库、备份及调试日志不提交。发布密码通过 keystore/signing.properties 或 SECBACK_STOREPASSWORD、SECBACK_KEYALIAS、SECBACK_KEYPASSWORD 环境变量提供，不写回 Gradle 源码。
 
-- 名字随意，比如 `secback`
-- **建议选 Private**（这是密码本工具）
-- **不要**勾选 "Add a README file"、".gitignore"、"license"
-  —— 勾了远端会先有一个提交，直接推会冲突，得先 pull 再处理。
+## 交付物
 
-## 2. 关联远端并推送
+APK、exe 和随包生成的 manifest 均属于交付产物，不进入源码提交。2026-11-27 起，历史已跟踪的 delivery/android/SecBack-Android-arm64.apk 从 Git 索引移除，磁盘文件继续保留；不重写历史提交。需要对外提供安装包时，单独上传发行附件。
 
-把 `<你的用户名>` 和 `<仓库名>` 换掉：
+发布同时生成 manifest，记录版本、versionCode、ABI、APK/.so SHA-256、签名指纹、源提交和工作区是否含修改。若是在提交前构建，sourceDirty=true 是真实状态，不能将其伪装为干净提交产物。
 
-```bash
-cd /d/WorkSpace/SecBackTauri
+任何推送、发布到外部服务等对外动作需获得用户授权。本轮仅本地提交。个人脚本 `清理剩余构建缓存.ps1` 保留本机并已忽略。
 
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-git push -u origin main
-```
+## 持续检查
 
-## 3. 认证
-
-**HTTPS 方式**：GitHub 不再接受账号密码。密码框里要填
-Personal Access Token（Settings → Developer settings → Personal access tokens，
-勾 `repo` 权限）。Windows 上通常会被凭据管理器记住，只输一次。
-
-**SSH 方式**（推荐，配一次以后不用管）：
-
-```bash
-ssh-keygen -t ed25519 -C "your@email.com"     # 一路回车
-cat ~/.ssh/id_ed25519.pub                      # 复制内容到 GitHub → SSH keys
-ssh -T git@github.com                          # 看到 "Hi xxx" 就通了
-
-git remote add origin git@github.com:<你的用户名>/<仓库名>.git
-git push -u origin main
-```
-
-## 4. 之后日常提交
-
-```bash
-git add -A
-git commit -m "说明这次改了什么"
-git push
-```
-
-## 已经排除的内容
-
-`target/`（6GB+）、`node_modules/`、`delivery/*.exe`、`*.properties`（密库）、
-`src-tauri/gen/`（自动生成）。所以仓库只有约 2MB、38 个文件。
-
-改完 `.gitignore` 想确认某类文件是否被挡：
-
-```bash
-git check-ignore -v 某个文件      # 显示命中了哪条规则
-git status --short                # 看还有哪些没提交
-```
+.github/workflows/check.yml 配置 Windows/Linux 核心回归、Windows 协议回归、版本及 JS 语法检查，并运行 npm audit 与 cargo audit。工作流存在不代表本轮已在 GitHub 执行通过；在线数据库结果以实际运行时为准。Android Gradle 依赖更新需单独做构建与真机回归，已提供解析实际依赖的 Gradle/OSV 审计脚本与 CI 步骤；已知剩余项及本地结果见 Android导入与依赖审计-2026-11-26.md。工作流未在远端运行时不能声称通过。

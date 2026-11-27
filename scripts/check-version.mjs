@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const root=new URL('../',import.meta.url),pkg=JSON.parse(fs.readFileSync(new URL('package.json',root))),config=JSON.parse(fs.readFileSync(new URL('src-tauri/tauri.conf.json',root)));
+const cargo=fs.readFileSync(new URL('src-tauri/Cargo.toml',root),'utf8').match(/^version = "([^"]+)"/m)[1];
+assert.match(pkg.version,/^\d{1,3}\.\d{1,3}\.\d{1,3}$/,'Product version must contain three 0–999 integers');
+assert(Number.isSafeInteger(pkg.androidVersionCode)&&pkg.androidVersionCode>0&&pkg.androidVersionCode<=2100000000,'Android upgrade code must be a positive integer <= 2100000000');
+assert.equal(config.version,'../package.json','Tauri must use package.json version');assert.equal(cargo,pkg.version,'Cargo package version must match');
+const lock=JSON.parse(fs.readFileSync(new URL('package-lock.json',root)));assert.equal(lock.version,pkg.version);assert.equal(lock.packages[''].version,pkg.version);
+const cargoLock=fs.readFileSync(new URL('src-tauri/Cargo.lock',root),'utf8').match(/name = "secback"\s+version = "([^"]+)"/)[1];assert.equal(cargoLock,pkg.version);
+console.log('版本一致：'+pkg.version);

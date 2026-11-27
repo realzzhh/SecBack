@@ -1,17 +1,9 @@
 // 对编译后的 WebView 运行：CDP_PORT=9222 node tests/p1-ui.mjs。
 // 仅拦截协议使用虚构数据；真实写盘回归由核心测试和隔离密库端到端验证负责。
 import assert from 'node:assert/strict';
-const targets = await (await fetch(`http://127.0.0.1:${process.env.CDP_PORT || 9222}/json`)).json();
-const ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
-await new Promise(r => ws.addEventListener('open', r, { once: true }));
-let n = 0; const pending = new Map();
-ws.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.id) { pending.get(m.id)?.(m); pending.delete(m.id); } });
-const cmd = (method, params = {}) => new Promise(r => { const id = ++n; pending.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
-const run = async expression => {
-  const r = await cmd('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
-  return r.result.result.value;
-};
+import {connectCDP} from './cdp.mjs';
+const {cmd,run,close}=await connectCDP();
+try {
 const result = await run(`(async () => {
  const originalSend = send, originalState = S;
  const empty = () => ({user:'',remark:'',empty:true,hasPass:false});
@@ -60,4 +52,4 @@ for (const [name, value] of Object.entries(result)) assert.equal(value, true, na
 await cmd('Emulation.setDeviceMetricsOverride',{width:393,height:851,deviceScaleFactor:1,mobile:true});
 const layout = await run(`(() => {openEditor(null); for(let i=0;i<2;i++) $('m-slots').querySelector('[data-add]').click(); const body=$('overlay').querySelector('.modal-body'); body.scrollTop=body.scrollHeight; const rect=$('modal-save').getBoundingClientRect(); const out={buttonsVisible:rect.top>=0&&rect.bottom<851, panels:[...$('overlay').querySelectorAll('.form-panel')].every(el=>getComputedStyle(el).borderTopWidth!=='0px')};closeEditor();return out;})()`);
 assert.equal(layout.buttonsVisible,true); assert.equal(layout.panels,true);
-console.log(JSON.stringify({...result,...layout},null,2)); ws.close();
+console.log(JSON.stringify({...result,...layout},null,2)); } finally { close(); }

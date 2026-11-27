@@ -1,0 +1,97 @@
+name: Checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: node scripts/check-version.mjs
+      - run: node --check src/app.js
+      - run: node --check scripts/audit-gradle.mjs
+      - run: cargo test --manifest-path core/Cargo.toml --locked
+      - if: runner.os == 'Windows'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+      - if: runner.os == 'Windows'
+        run: npx tauri build --debug --no-bundle
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm audit
+      - run: cargo install cargo-audit --version 0.23.0 --locked
+      - name: RustSec audit (both lockfiles)
+        shell: bash
+        run: |
+          mkdir -p audit
+          status=0
+          cargo audit --file core/Cargo.lock --json > audit/core.json || status=1
+          cargo audit --file src-tauri/Cargo.lock --json > audit/tauri.json || status=1
+          exit "$status"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-audit
+          path: audit/
+          if-no-files-found: error
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;29.0.14206865'
+      - run: echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Generate local plugin paths
+        run: npx tauri android init --ci --skip-targets-install
+      - name: Build arm64 debug APK (no release secrets)
+        run: npx tauri android build --debug --target aarch64 --apk
+      - name: Resolve Gradle dependency graphs
+        shell: bash
+        run: |
+          mkdir -p audit
+          chmod +x src-tauri/gen/android/gradlew
+          cd src-tauri/gen/android
+          ./gradlew --no-daemon --no-configuration-cache -I "$GITHUB_WORKSPACE/scripts/audit-gradle.init.gradle" "-Psecback.auditOutput=$GITHUB_WORKSPACE/audit/gradle-coordinates.json" :secbackAuditCoordinates
+          ./gradlew -p buildSrc --no-daemon --no-configuration-cache -I "$GITHUB_WORKSPACE/scripts/audit-gradle.init.gradle" "-Psecback.auditOutput=$GITHUB_WORKSPACE/audit/buildsrc-coordinates.json" :secbackAuditCoordinates
+      - name: Online Maven advisory audit
+        run: node scripts/audit-gradle.mjs audit/gradle-coordinates.json audit/gradle.json audit/buildsrc-coordinates.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-checks
+          path: |
+            audit/
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

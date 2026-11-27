@@ -1,19 +1,26 @@
 :root {
-  --bg: #f5f6f8;
+  --bg: #f4f6f6;
   --panel: #ffffff;
-  --line: #e6e8ee;
-  --line-soft: #f0f1f5;
-  --text: #22252b;
-  --text-2: #4b5058;
-  --muted: #8b909a;
-  --accent: #185fa5;
-  --accent-hover: #14528f;
-  --accent-weak: #eaf2fb;
-  --accent-line: #bcd6ee;
+  --line: #dce3e2;
+  --line-soft: #eef2f1;
+  --text: #182623;
+  --text-2: #4b5c58;
+  --muted: #687d76;
+  --accent: #257767;
+  --accent-hover: #1d6557;
+  --accent-weak: #e7f2ee;
+  --accent-line: #b7d5ca;
+  --accent-foreground: #ffffff;
+  --button-bg: #f0f3f2;
+  --button-hover: #e5eae8;
+  --focus-ring: rgba(37, 119, 103, .2);
   --green: #1c5f3e;
   --green-bg: #eef8f1;
   --green-line: #cfe8d8;
-  --danger: #b4453c;
+  --danger: #a13f38;
+  --danger-bg: #faeceb;
+  --danger-hover: #f6dfdd;
+  --danger-line: #e7c4c0;
   --radius: 10px;
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05);
   --shadow-md: 0 10px 30px -14px rgba(16, 24, 40, .22);
@@ -35,7 +42,10 @@ html, body {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   user-select: none;
+  overscroll-behavior: none;
 }
+
+body { position: fixed; inset: 0; width: 100%; }
 
 svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -43,6 +53,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ---------------------------------------------------------------- 登录视图 */
@@ -52,7 +64,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   inset: 0;
   display: grid;
   place-items: center;
-  background: radial-gradient(1100px 560px at 50% -12%, #e9f0f8 0%, #f5f6f8 55%, #f5f6f8 100%);
+  background: radial-gradient(1100px 560px at 50% -12%, var(--accent-weak) 0%, var(--bg) 60%);
   -webkit-app-region: no-drag;
 }
 
@@ -116,10 +128,14 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
 .login-input::placeholder { letter-spacing: normal; color: #aab0b9; }
 
+.login-password-field { position: relative; }
+.login-password-field .login-input { height: 48px; padding-inline: 48px; }
+#login-confirm { margin-top: 10px; }
+
 .login-input:focus {
   background: #fff;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(24, 95, 165, .12);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .login-btn {
@@ -129,7 +145,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   border: 0;
   border-radius: 10px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground);
   font: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -205,7 +221,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 .search input:focus {
   background: #fff;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(24, 95, 165, .11);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .search input::-webkit-search-cancel-button { -webkit-appearance: none; }
@@ -259,6 +275,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -269,11 +286,15 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   background: var(--panel);
   border-right: 1px solid var(--line);
   position: relative;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: none;
   padding: 8px;
 }
 
@@ -322,7 +343,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   letter-spacing: -.02em;
 }
 
-.item.active .avatar { background: #d9e8f7; color: var(--accent); }
+.item.active .avatar { background: var(--accent-weak); color: var(--accent); }
 .item.imported .avatar { background: #dcefe3; color: var(--green); }
 
 .item-main { flex: 1; min-width: 0; }
@@ -433,25 +454,28 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   transition: background .13s, border-color .13s, color .13s;
 }
 
+.with-icon { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.button-icon { width: 17px; height: 17px; flex: none; stroke-width: 1.8; }
+
 .btn.ghost {
-  background: #fff;
+  background: var(--button-bg);
   border-color: var(--line);
   color: var(--text-2);
 }
 
-.btn.ghost:hover { border-color: #d3d7df; background: #fbfbfd; }
+.btn.ghost:hover { border-color: var(--line); background: var(--button-hover); }
 
 .btn.danger-ghost {
-  background: #fff;
-  border-color: var(--line);
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
   color: var(--danger);
 }
 
-.btn.danger-ghost:hover { background: #fdf3f2; border-color: #eccfcc; }
+.btn.danger-ghost:hover { background: var(--danger-hover); }
 
 .btn.primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground);
   font-weight: 500;
 }
 
@@ -535,8 +559,22 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   transition: background .12s, border-color .12s;
 }
 
-.mini:hover { background: #f7f8fa; border-color: #d5d9e1; }
-.mini:active { background: #eef0f4; }
+.mini:hover { background: var(--button-hover); border-color: var(--line); }
+.mini:active { background: var(--accent-weak); color: var(--accent); }
+.mini.icon-action {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 9px;
+  color: var(--text-2);
+}
+.mini.icon-action:hover { background: var(--button-hover); color: var(--accent); }
+.mini.icon-action[aria-pressed="true"] { background: var(--accent-weak); color: var(--accent); }
+.mini.icon-action .button-icon { width: 19px; height: 19px; }
 
 .meta {
   margin-top: 26px;
@@ -636,7 +674,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
 .field input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(24, 95, 165, .11);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .slots-edit { margin: 6px 0 4px; }
@@ -707,7 +745,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
 .slot-edit input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(24, 95, 165, .1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .slot-edit input::placeholder { color: #b3b8c0; }
@@ -786,14 +824,14 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 }
 
 .btn.danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
+  background: var(--danger-bg);
+  border-color: var(--danger-line);
+  color: var(--danger);
 }
 
 .btn.danger:hover {
-  background: #9e3a32;
-  border-color: #9e3a32;
+  background: var(--danger-hover);
+  border-color: var(--danger-line);
 }
 
 .btn.danger:focus-visible {
@@ -897,21 +935,28 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
 [data-theme="dark"] {
   color-scheme: dark;          /* 让原生滚动条、checkbox、右键菜单也变深 */
-  --bg: #14161a;
-  --panel: #1c1f25;
-  --line: #2b2f37;
-  --line-soft: #23262c;
-  --text: #e2e5ea;
-  --text-2: #a6acb6;
-  --muted: #767d88;
-  --accent: #5aa2ff;
-  --accent-hover: #7bb5ff;
-  --accent-weak: #16283d;
-  --accent-line: #2b4463;
+  --bg: #101517;
+  --panel: #181e20;
+  --line: #2c3739;
+  --line-soft: #222a2c;
+  --text: #edf2f1;
+  --text-2: #bac6c3;
+  --muted: #8b9d98;
+  --accent: #5ab9a4;
+  --accent-hover: #72c9b6;
+  --accent-weak: #1c3530;
+  --accent-line: #31574d;
+  --accent-foreground: #102c25;
+  --button-bg: #252e30;
+  --button-hover: #303b3d;
+  --focus-ring: rgba(90, 185, 164, .22);
   --green: #6cc48d;
   --green-bg: #17281d;
   --green-line: #24452f;
-  --danger: #e26055;
+  --danger: #e7aaa2;
+  --danger-bg: #3b2627;
+  --danger-hover: #4a2e2f;
+  --danger-line: #624043;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
   --shadow-md: 0 10px 30px -14px rgba(0, 0, 0, .75);
 }
@@ -919,7 +964,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 /* ---- 登录页 ---- */
 
 [data-theme="dark"] .login {
-  background: radial-gradient(1100px 560px at 50% -12%, #1c2532 0%, #14161a 55%, #14161a 100%);
+  background: radial-gradient(1100px 560px at 50% -12%, var(--accent-weak) 0%, var(--bg) 60%);
 }
 
 [data-theme="dark"] .login-card {
@@ -945,7 +990,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 [data-theme="dark"] .slot-edit input:focus {
   background: #171a1f;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(90, 162, 255, .18);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 [data-theme="dark"] .login-input::placeholder,
@@ -973,7 +1018,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 }
 
 [data-theme="dark"] .item.active .avatar {
-  background: #1b2f45;
+  background: var(--accent-weak);
   color: var(--accent);
 }
 
@@ -990,43 +1035,26 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 /* ---- 按钮 ---- */
 
 [data-theme="dark"] .btn.ghost,
-[data-theme="dark"] .btn.danger-ghost,
-[data-theme="dark"] .mini {
-  background: #22262d;
-  border-color: #343a44;
+[data-theme="dark"] .mini:not(.icon-action) {
+  background: var(--button-bg);
+  border-color: var(--line);
   color: var(--text-2);
 }
 
 [data-theme="dark"] .btn.ghost:hover {
-  background: #2a2f38;
-  border-color: #414852;
+  background: var(--button-hover);
+  border-color: var(--line);
 }
 
-[data-theme="dark"] .btn.danger-ghost:hover {
-  background: #2e1e1d;
-  border-color: #5c322e;
-}
-
-[data-theme="dark"] .mini:hover { background: #2a2f38; border-color: #414852; }
-[data-theme="dark"] .mini:active { background: #313742; }
+[data-theme="dark"] .mini:hover { background: var(--button-hover); border-color: var(--line); }
+[data-theme="dark"] .mini:active { background: var(--accent-weak); }
 [data-theme="dark"] .icon-btn:hover { background: #262a32; color: var(--text); }
 
-[data-theme="dark"] .btn.danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #14090a;
-}
-
-[data-theme="dark"] .btn.danger:hover {
-  background: #c94f45;
-  border-color: #c94f45;
-}
-
-/* 主按钮是亮蓝底，白字在深色下反而不够清楚，改用近黑的字 */
+/* 主按钮的文字色由主题统一提供。 */
 [data-theme="dark"] .login-btn,
 [data-theme="dark"] .btn.primary,
 [data-theme="dark"] #btn-new {
-  color: #0e1116;
+  color: var(--accent-foreground);
 }
 
 /* ---- 详情与槽位 ---- */
@@ -1062,7 +1090,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
 [data-theme="dark"] .imp-tree { background: #191c21; }
 [data-theme="dark"] .imp-proj-head { background: #22262d; }
-[data-theme="dark"] .imp-badge { background: var(--accent-weak); color: #7bb5ff; }
+[data-theme="dark"] .imp-badge { background: var(--accent-weak); color: var(--accent); }
 [data-theme="dark"] .imp-badge.warn { background: #33260f; color: #d9a441; }
 
 /* 滚动条有自定义样式，color-scheme: dark 盖不住，得单独给深色值 */
@@ -1156,6 +1184,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 .pane-back:active { background: var(--line); }
 
 @media (max-width: 700px) {
+  #app { height: var(--vvh, 100%); }
   /* ---- 单栏：列表和详情互斥 ---- */
   .body {
     display: block;
@@ -1196,7 +1225,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   .btn { min-height: 44px; }
   .tool { min-width: 44px; min-height: 44px; }
   .icon-btn { min-width: 44px; min-height: 44px; }
-  .mini { min-height: 40px; }
+  .mini.icon-action { width: 44px; height: 44px; }
   .pane-back { width: 44px; height: 44px; }
 
   /* ---- 工具栏：挤一行放不下，收紧间距 + 隐藏次要项 ---- */
@@ -1239,60 +1268,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   }
 }
 
-/* ---- 移动端弹层 ----
-   桌面 .modal 写死 560px，手机上直接溢出屏幕；100vh 也不随软键盘变化。
-   这里改成撑满可视宽、限高、内部滚动，配合 Manifest 的 adjustResize。 */
-@media (max-width: 700px) {
-  .overlay {
-    padding: 10px;
-    align-items: center;
-  }
 
-  .modal,
-  .modal.narrow {
-    width: 100%;
-    max-width: 100%;
-    max-height: calc(100vh - 20px);
-    border-radius: 12px;
-  }
 
-  /* 键盘弹起后 body 变矮，让内容自己滚，别把按钮顶出去 */
-  .modal-body {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-  }
 
-  .modal-foot { flex: none; }
-
-  /* 账户槽位原来是「账号 / 密码」并排，窄屏改单列，否则每个框只剩一半宽 */
-  .slot-edit .fields,
-  .slot-edit .grid {
-    grid-template-columns: 1fr !important;
-  }
-}
-
-/* 弹层高度策略。
-   试过 visualViewport 和 viewport 的 interactive-widget=resizes-content，
-   在 Android 15 上都不生效——edge-to-edge 之后 WebView 的布局视口压根不随键盘变。
-   所以改成看"有没有输入框聚焦"：聚焦基本等于键盘弹起，这时把弹层压到半屏，
-   底部的保存按钮就能落在键盘上方。 */
-@media (max-width: 700px) {
-  .modal,
-  .modal.narrow {
-    max-height: 85vh;
-  }
-
-  .modal:focus-within {
-    max-height: 50vh;
-  }
-
-  .overlay {
-    /* grid 的 place-items：垂直靠上、水平居中。
-       竖直居中会让 50vh 的弹层落到 25vh~75vh，底部照样压在键盘底下。 */
-    place-items: start center;
-    padding: 10px;
-  }
-}
 
 /* 详情页在窄屏是全屏的：列表那一排工具栏（搜索/新增/导入/锁定）留着只会挤占高度，
    而且和详情自己的头部（返回 + 标题 + 编辑/删除）功能重叠。
@@ -1433,40 +1411,31 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   display: block;
 }
 
-/* ============================================================
-   窄屏弹层改为整页（2026-11-24 晚，根据 P10 实机反馈）
-   ------------------------------------------------------------
-   上一版为了躲开软键盘，把弹层压到 50vh。实机上用下来问题更大：
-   「新建项目」这种简单表单只占上半屏，3 个账户槽要滚动才看得全，
-   比桌面版还难填。
-
-   改成整页铺满：
-     头部固定 / 内容区滚动 / 底部按钮固定
-   内容不多时（新建项目就 3 个槽）一眼看全，根本不用滚；
-   内容多（比如备注很长）才滚动，这是正常的。
-
-   键盘弹起时底部按钮可能被盖住，需要点「完成」收起键盘——
-   这个取舍比"永远只有半屏"划算。
-   ============================================================ */
+/* 窄屏弹层：按实际可视高度铺满，只滚动正文。
+   普通弹层为 head/body/foot；编辑器保留 head/foot/body 的顶部操作栏顺序。 */
 @media (max-width: 700px) {
   .overlay {
+    height: var(--vvh, 100%);
+    bottom: auto;
     padding: 0;
     place-items: stretch;   /* 子元素铺满容器，不再是居中 */
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .modal,
-  .modal.narrow {
+  .modal.narrow,
+  .modal.wide {
+    display: flex;
+    flex-direction: column;
     width: 100%;
     max-width: 100%;
+    min-width: 0;
     height: 100%;
     max-height: 100%;
+    min-height: 0;
     border-radius: 0;
+    overflow: hidden;
     animation: none;        /* 整页切换不需要弹跳动画，闪一下反而怪 */
-  }
-
-  /* 覆盖前面那条 focus-within 收缩规则 */
-  .modal:focus-within {
-    max-height: 100%;
   }
 
   .modal-head {
@@ -1486,6 +1455,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     flex: none;
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
+  .slot-edit .grid { grid-template-columns: 1fr; }
+  #btn-more { display: none; }
 }
 
 /* 空状态提示里"底部/右上角"要按屏幕切换：手机是底部操作栏，桌面才是右上角 */
@@ -1498,38 +1469,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   .only-desktop { display: none; }
 }
 
-/* 窄屏弹层：整体滚动，而不是只有内容区滚。
-   原因：弹层高度 = 可视区高度，但软键盘会盖住下半截，
-   光让 .modal-body 滚动的话，内容不溢出时根本滑不动，
-   用户永远看不到被键盘挡住的底部按钮。
-   改成整个 .modal 滚，滑到最下面就能看到「保存」。
-   （P10 实机反馈：按非输入框位置能上下拖） */
-@media (max-width: 700px) {
-  .modal,
-  .modal.narrow {
-    display: block;      /* 放弃 flex 布局，改回普通文档流 */
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-  }
 
-  /* 内容区不再单独滚动，交给外层 */
-  .modal-body {
-    flex: none;
-    min-height: 0;
-    overflow: visible;
-  }
-
-  /* 头尾跟着内容走，不再固定——固定的话按钮会停在键盘底下 */
-  .modal-head {
-    position: static;
-  }
-
-  .modal-foot {
-    position: static;
-    padding-bottom: calc(20px + env(safe-area-inset-bottom));
-  }
-}
 
 /* ============================================================
    长按拖动排序（2026-11-25）
@@ -1566,40 +1506,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   overflow: hidden;
 }
 
-/* ============================================================
-   长按拖动排序（2026-11-25）
-   ------------------------------------------------------------
-   按住 1 秒项目"拿起来"，上下拖动时其他项让位，松手落定。
-   手机上把上移/下移按钮隐藏了，排序只能靠这个。
-   ============================================================ */
-
-/* 默认给个过渡，让位动画才顺滑；拖动中的元素单独关掉过渡（要跟手） */
-.item {
-  transition: transform .16s ease, box-shadow .16s ease;
-}
-
-.item.dragging {
-  position: relative;
-  z-index: 10;
-  /* 跟手的时候不能有过渡，否则手指走了元素才慢慢追上来 */
-  transition: none;
-  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, .75);
-  /* 描一圈边表示"拿起来了" */
-  outline: 2px solid var(--accent, #4a9eff);
-  outline-offset: -2px;
-  opacity: .96;
-}
-
-/* 让位中的项走过渡，看起来是"滑开"而不是"跳开" */
-.item.shifting {
-  transition: transform .16s ease;
-}
-
-/* 拖动期间禁掉列表自身的惯性滚动，避免和拖动打架 */
-.list.sorting {
-  touch-action: none;
-  overflow: hidden;
-}
+/* 排序前完整测量行高，避免离屏内容的预估高度在拖动时改变列表范围。 */
+#list.sorting .item { content-visibility: visible; }
 
 /* 提示里的路径太长，allow 任意断行的同时别把中文词拆开。
    之前用 overflow-wrap:anywhere 会把"位置"拆成"位 / 置"两行，
@@ -1638,12 +1546,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
 @media (max-width: 700px) {
   .pane-actions {
-    position: sticky;
-    bottom: 0;
-    z-index: 4;
     justify-content: stretch;
-    /* 抵消 .pane 的左右内边距，让按钮贴到屏幕两边 */
-    margin: 0 -14px;
     padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
     background: var(--panel);
     border-top: 1px solid var(--line);
@@ -1751,13 +1654,28 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     padding: 10px 12px;
   }
 
-  /* ---- 编辑/删除固定在屏幕最底部，不随内容滚动 ---- */
+  /* 详情页只有正文滚动，头部和操作栏各占固定的一行。 */
+  .detail { overflow: hidden; }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    max-width: none;
+    padding: 0;
+    overflow: hidden;
+  }
+  .pane-head { flex: none; margin: 0; position: static; }
+  .pane-content {
+    flex: 1;
+    min-height: 0;
+    padding: 14px;
+    overflow-y: auto;
+    overscroll-behavior: none;
+  }
   .pane-actions {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
+    position: static;
+    flex: none;
     margin: 0;
     padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
     background: var(--panel);
@@ -1765,19 +1683,19 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     justify-content: stretch;
   }
 
-  /* 上底色：删除红、编辑蓝 */
+  /* 删除使用柔和的语义色，主要操作跟随主题强调色。 */
   .pane-actions #btn-delete {
     flex: 1;
-    background: var(--danger);
-    border-color: transparent;
-    color: #fff;
+    background: var(--danger-bg);
+    border-color: var(--danger-line);
+    color: var(--danger);
   }
 
   .pane-actions #btn-edit {
     flex: 3;
     background: var(--accent);
     border-color: transparent;
-    color: #fff;
+    color: var(--accent-foreground);
   }
 
   .pane-actions .btn {
@@ -1786,10 +1704,6 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     border-radius: 10px;
   }
 
-  /* 固定底栏会盖住内容，给详情页留出空间 */
-  .pane {
-    padding-bottom: calc(88px + env(safe-area-inset-bottom));
-  }
 }
 
 /* ---- 通知条再往下一点，别压住状态栏 ---- */
@@ -1804,34 +1718,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
    社区的模板都是整栈的（Vue/React + Naive UI 或 shadcn/ui + Tailwind），
    要引入等于把整个前端重写，这套无构建的原生页面换不动。
 
-   但设计规范可以借：下面这组灰阶和蓝色取自 Radix Colors 的 dark 色板，
-   它按"表面色阶"设计（背景/卡片/边框各差一级），比随手调亮度更有层次感，
-   对比度也符合 WCAG。
+   表面、边框和操作色分层，颜色统一由上方的深浅主题变量提供。
    ============================================================ */
-
-[data-theme="dark"] {
-  /* 表面色阶：越靠前越暗，卡片比背景亮一级，边框再亮一级 */
-  --bg: #0e1013;
-  --panel: #16181d;
-  --line-soft: #1e2127;
-  --line: #272b33;
-
-  --text: #eceef2;
-  --text-2: #a4abb6;
-  --muted: #6d7480;
-
-  --accent: #4c9aff;
-  --accent-hover: #6cb0ff;
-  --accent-weak: #14243a;
-  --accent-line: #26456b;
-
-  --danger: #e5484d;
-  --green: #46a758;
-
-  /* 阴影在深色下要更重才看得出来 */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
-  --shadow-md: 0 12px 32px -14px rgba(0, 0, 0, .7);
-}
 
 /* 返回按钮：SVG 箭头，flex 居中就是真的几何居中 */
 .pane-back svg {
@@ -1865,6 +1753,31 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   padding-left: 33px;
 }
 
+.password-field > input { padding-right: 48px; min-height: 44px; }
+.password-visibility {
+  position: absolute;
+  top: 50%;
+  right: 1px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.password-visibility svg { width: 20px; height: 20px; }
+/* 图标表示当前状态：隐藏时闭眼，显示时睁眼。 */
+.password-visibility .eye-open, .eye-toggle .eye-open { display: none; }
+.password-visibility[aria-pressed="true"] .eye-closed, .eye-toggle[aria-pressed="true"] .eye-closed { display: none; }
+.password-visibility[aria-pressed="true"] .eye-open, .eye-toggle[aria-pressed="true"] .eye-open { display: block; }
+.password-visibility:active { color: var(--accent); }
+
 /* 聚焦时图标跟着变亮，强化"正在编辑这一格" */
 .ifield:focus-within > svg {
   color: var(--accent);
@@ -1885,6 +1798,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 }
 
 .slot-edit-head .has-pass {
+  flex: none;
+  white-space: nowrap;
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: 4px;
@@ -1947,7 +1862,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 /* 展开时箭头转 90 度，一眼看出状态 */
 .slot-edit.expanded .chev { transform: rotate(90deg); }
 
-.slot-toggle .slot-name { font-weight: 600; }
+.slot-toggle .slot-name { font-weight: 600; white-space: nowrap; flex: none; }
 
 /* 收起时右侧显示"里面填了什么"的摘要 */
 .slot-toggle .slot-summary {
@@ -2077,7 +1992,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
 
   /* 标题栏和操作栏粘在顶部：往下滑内容时它们不动，
      否则"保存/取消"会跟着滚出去，得滑回顶部才点得到。 */
-  .modal-head {
+  #overlay .modal-head {
     position: sticky;
     top: 0;
     z-index: 6;
@@ -2086,7 +2001,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
     border-bottom: 1px solid var(--line);
   }
 
-  .modal-foot {
+  #overlay .modal-foot {
     position: sticky;
     /* --head-h 由 JS 在打开时量一次写进来，写死数值在字体变化时会错位 */
     top: var(--head-h, 56px);
@@ -2096,7 +2011,57 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round
   }
 
   /* body 顶部不再需要额外留白，滚动时内容从操作栏下方穿过 */
-  .modal-body {
+  #overlay .modal-body {
     padding-top: 4px;
   }
 }
+
+.slot-remove{width:44px;height:44px;min-width:44px;flex-shrink:0;}
+.item:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+#list .item{content-visibility:auto;contain-intrinsic-size:auto 72px;}
+#btn-more.warn{color:var(--danger,#ff6c78);}
+#discard{z-index:150;}
+[aria-disabled=true]{opacity:.6;}
+
+/* 0.1.1：Windows 菜单与正文各占独立一行，详情仅正文可滚动。 */
+.desktop-chrome { display: none; }
+.login-mark { background: transparent; box-shadow: none; width: 64px; height: 64px; border-radius: 16px; }
+.login-mark img { display: block; width: 64px; height: 64px; }
+@media (min-width: 701px) {
+ .detail { overflow: hidden; }
+ .pane { display:flex; flex-direction:column; height:100%; min-height:0; max-width:none; padding:0; overflow:hidden; }
+ .pane-head { flex:none; margin:0; padding:26px 34px 20px; border-bottom:1px solid var(--line-soft); }
+ .pane-content { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:24px 34px; }
+ .pane-content > .slots, .pane-content > .meta { max-width:720px; margin-left:auto; margin-right:auto; }
+ .pane-actions { flex:none; margin:0; padding:14px 24px; border-top:1px solid var(--line); background:var(--panel); }
+ .pane-actions .btn { height:38px; min-width:96px; }
+ .pane-actions #btn-edit { background:var(--accent); color:var(--accent-foreground); border-color:transparent; }
+ .pane-actions #btn-edit:hover { background:var(--accent-hover); }
+ html[data-platform="windows"] body { display:flex; flex-direction:column; }
+ html[data-platform="windows"] #app { flex:1; height:auto; width:100%; }
+ html[data-platform="windows"] .login { top:56px; }
+ html[data-platform="windows"] .desktop-chrome { display:flex; flex:none; align-items:center; gap:28px; height:56px; padding:0 20px; background:var(--panel); border-bottom:1px solid var(--line); z-index:20; }
+ .desktop-brand { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:650; letter-spacing:.1px; white-space:nowrap; }
+ .desktop-brand img { display:block; }
+ .brand-caption { padding-left:10px; margin-left:3px; border-left:1px solid var(--line); font-size:11px; font-weight:400; color:var(--muted); }
+ #desktop-menubar { display:flex; align-items:center; gap:5px; }
+ .desktop-menu { position:relative; }
+ .desktop-menu-trigger { height:34px; display:flex; align-items:center; gap:7px; padding:0 10px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--text-2); font:inherit; font-size:12px; cursor:pointer; }
+ .desktop-menu-trigger .button-icon { width:16px; height:16px; color:var(--muted); }
+ .desktop-menu-trigger .menu-chevron { width:12px; height:12px; color:var(--muted); }
+ .desktop-menu-trigger:hover { background:var(--button-bg); color:var(--text); }
+ .desktop-menu-trigger[aria-expanded="true"] { color:var(--accent); background:var(--accent-weak); border-color:var(--accent-line); }
+ .desktop-menu-trigger[aria-expanded="true"] .button-icon { color:var(--accent); }
+ .desktop-dropdown { position:absolute; top:calc(100% + 9px); left:0; width:248px; padding:6px; border:1px solid var(--line); border-radius:12px; background:var(--panel); box-shadow:0 12px 36px #0003; }
+ .desktop-dropdown button { display:flex; align-items:center; width:100%; gap:10px; min-height:38px; padding:0 10px; border:0; border-radius:7px; color:var(--text-2); background:transparent; font:inherit; font-size:12px; text-align:left; cursor:pointer; }
+ .desktop-dropdown button:hover:not(:disabled),.desktop-dropdown button:focus-visible { background:var(--accent-weak); color:var(--text); }
+ .desktop-dropdown button:disabled { color:var(--muted); opacity:.45; cursor:default; }
+ .desktop-dropdown .button-icon { width:16px; height:16px; color:var(--muted); }
+ .desktop-dropdown kbd { margin-left:auto; font:11px 'Segoe UI',sans-serif; color:var(--muted); }
+ .menu-separator { height:1px; margin:5px 8px; background:var(--line-soft); }
+ .menu-check { visibility:hidden; margin-left:auto; color:var(--accent); font-size:15px; }
+ [aria-checked="true"] .menu-check { visibility:visible; }
+ .desktop-local { margin-left:auto; color:var(--muted); font-size:11px; white-space:nowrap; }
+ html[data-platform="windows"] #btn-more { display:none; }
+}
+@media (min-width:701px) and (max-width:920px) { .brand-caption,.desktop-local { display:none; } }

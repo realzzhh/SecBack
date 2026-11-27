@@ -10,6 +10,16 @@ buildscript {
 }
 
 allprojects {
+    // Tauri's Android JSON bridge uses Jackson. Keep its modules on the same
+    // supported patch line instead of the template's vulnerable 2.15.3.
+    configurations.configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group.startsWith("com.fasterxml.jackson")) {
+                useVersion("2.18.11")
+                because("OSV audit: patched JSON parser and databind vulnerabilities")
+            }
+        }
+    }
     repositories {
         google()
         mavenCentral()

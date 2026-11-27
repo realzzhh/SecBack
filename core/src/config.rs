@@ -25,7 +25,11 @@ pub struct Resolved {
 /// 解析结果。配置写错时不是"悄悄退回默认"，而是明确报错——
 /// 否则用户会以为自己打开的是原来那个库，实际上是新建了一个空库。
 pub fn resolve(exe_dir: &Path) -> Result<Resolved, String> {
-    let text = std::fs::read_to_string(exe_dir.join(CONFIG_NAME)).ok();
+    let text = match std::fs::read_to_string(exe_dir.join(CONFIG_NAME)) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("无法读取配置文件：{e}")),
+    };
     resolve_with(exe_dir, text.as_deref(), &|k| std::env::var(k).ok())
 }
 
@@ -144,7 +148,7 @@ fn normalize_seps(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         let c = if c == '/' { '\\' } else { c };
-        if c == '\\' && out.ends_with('\\') {
+        if c == '\\' && out.ends_with('\\') && out.len() != 1 {
             continue; // 压掉重复分隔符
         }
         out.push(c);
@@ -190,12 +194,12 @@ mod tests {
 
     #[test]
     fn relative_path_is_relative_to_exe() {
-        let cfg = "vault = data\\vault.properties";
+        let cfg = "vault = data/vault.properties";
         let r = resolve_with(&exe(), Some(cfg), &no_env).unwrap();
         assert!(r
             .path
             .to_string_lossy()
-            .ends_with("secback_config_test\\data\\vault.properties"));
+            .ends_with(&normalize_seps("secback_config_test/data/vault.properties")));
     }
 
     #[test]
@@ -271,4 +275,8 @@ mod tests {
         let r = resolve_with(&exe(), Some(cfg), &no_env).unwrap();
         assert!(!r.from_config);
     }
+}
+
+#[cfg(all(test,windows))] mod unc_tests {
+ #[test] fn unc_prefix_is_preserved(){assert_eq!(super::normalize_seps(r"\\server\share\\vault.properties"),r"\\server\share\vault.properties");}
 }

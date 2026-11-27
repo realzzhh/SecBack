@@ -1,4 +1,5 @@
 import java.util.Properties
+import groovy.json.JsonSlurper
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -14,16 +15,36 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val secbackSourceRoot = file(project.findProperty("secback.sourceRoot")?.toString() ?: "../../../..")
+val signingSecrets = Properties().apply {
+    val secrets = secbackSourceRoot.resolve("keystore/signing.properties")
+    if (secrets.exists()) secrets.inputStream().use { load(it) }
+}
+fun signingValue(key: String): String? = System.getenv("SECBACK_" + key.uppercase()) ?: signingSecrets.getProperty(key)
+if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+    require(listOf("storePassword", "keyAlias", "keyPassword").all { !signingValue(it).isNullOrBlank() }) {
+        "发布签名缺失：配置 keystore/signing.properties 或 SECBACK_STOREPASSWORD / SECBACK_KEYALIAS / SECBACK_KEYPASSWORD"
+    }
+}
+
+val productMetadata = JsonSlurper().parse(secbackSourceRoot.resolve("package.json")) as Map<*, *>
+val productVersion = productMetadata["version"].toString()
+val versionParts = productVersion.split('.').map { it.toInt() }
+require(versionParts.size == 3 && versionParts.all { it in 0..999 }) { "版本号须为三个 0～999 的整数" }
+// 展示版本与安装升级序号独立，允许 1.0.0 调试包安全过渡到 0.1.0。
+val productVersionCode = (productMetadata["androidVersionCode"] as Number).toInt()
+require(productVersionCode in 1..2_100_000_000) { "androidVersionCode 必须为正整数且不超过 2100000000" }
+
 android {
     // release 包必须签名才能装到手机上。这里指向项目根目录 keystore/ 下那一个，
     // 换成别的证书会导致「已安装的旧版无法覆盖升级」，所以别随便换。
     // 证书和密码都在 .gitignore 里，不入库。
     signingConfigs {
         create("release") {
-            storeFile = file("../../../../keystore/secback-release.keystore")
-            storePassword = "secback2026"
-            keyAlias = "secback"
-            keyPassword = "secback2026"
+            storeFile = secbackSourceRoot.resolve("keystore/secback-release.keystore")
+            storePassword = signingValue("storePassword")
+            keyAlias = signingValue("keyAlias")
+            keyPassword = signingValue("keyPassword")
         }
     }
 
@@ -34,8 +55,8 @@ android {
         applicationId = "com.secback.vault"
         minSdk = 24
         targetSdk = 37
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = productVersionCode
+        versionName = productVersion
     }
     buildTypes {
         getByName("debug") {
