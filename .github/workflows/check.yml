@@ -70,6 +70,9 @@ jobs:
         with:
           targets: aarch64-linux-android
       - uses: android-actions/setup-android@v3
+        with:
+          # The legacy 'tools' package is no longer available from Google.
+          packages: 'platform-tools'
       - run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;29.0.14206865'
       - run: echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
       - run: npm ci
