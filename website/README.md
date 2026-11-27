@@ -24,9 +24,16 @@ node website/serve.mjs
 
 ## 下载与发布
 
-Windows、Android 的获取按钮均明确前往 `https://github.com/realzzhh/SecBack/releases`，未假定 0.1.1 已经上传，也未编造直接下载地址。实际发布文件后，可在 `index.html` 中替换两处 `.download-link` 地址、按钮下方说明，并更新版本、日期和截图。
+Windows、Android 的下载按钮分别指向已发布的 0.1.1 附件，页脚和更新日志仍保留发行页入口：
 
-可将 `website/` 的网页与 `assets/` 原样部署到任意静态托管目录。所有本地资源使用相对路径，支持 GitHub Pages 的仓库子路径；根页面为 `index.html`。`README.md` 和 `serve.mjs` 无需上传。当前仅准备本地文件，未创建 Pages 工作流、修改仓库设置或对外发布。
+```text
+https://github.com/realzzhh/SecBack/releases/download/0.1.1/SecBack-0.1.1-Windows-x64.exe
+https://github.com/realzzhh/SecBack/releases/download/0.1.1/SecBack-0.1.1-Android-arm64.apk
+```
+
+注意实际 Git 标签为 `0.1.1`，没有 `v` 前缀。发布新版本时，先将文件上传为 Release 附件并确认下载可用，再更新 `index.html` 中两处 `.download-link` 的版本标签和文件名，以及页面版本、日期和截图。地址中的标签和文件名必须与已发布附件完全一致；将二进制放入源码仓库或 Actions 构建产物列表不等于上传了 Release 附件。下载链接使用固定版本，避免页面仍写 0.1.1 时实际下载到其他版本。
+
+可将 `website/` 的网页与 `assets/` 原样部署到任意静态托管目录。所有本地资源使用相对路径，支持 GitHub Pages 的仓库子路径；根页面为 `index.html`。`README.md` 和 `serve.mjs` 无需上传。用户已配置 GitHub Pages；提交网页修改后，需等待对应 Pages 工作流成功部署才会更新在线页面。
 
 页面结构参考 InkMark 介绍页（`https://1atlas0.github.io/InkMark-Release/`）的平台入口、预览、功能和更新日志组织方式；未复制其代码、图标、截图或产品文案。SecBack 内容以本项目 README、能力与限制、0.1.1 界面与发布记录为依据。安全说明避免承诺绝对安全；Android 0.1.1 明确标注尚待真机验证。
 
@@ -42,3 +49,5 @@ Windows、Android 的获取按钮均明确前往 `https://github.com/realzzhh/Se
 - `node --check website/app.js`、`node --check website/serve.mjs` 和 Git 已跟踪改动的空白检查通过。
 
 这次仅验证独立门户页面，未重新构建应用，也未进行手机真机测试。
+
+同日下载链接修正：通过 GitHub 发行页核实标签及附件 URL，实际下载 EXE 和 APK，SHA256 与发行页展示值一致。此记录验证下载完整性，不代表新增应用运行或真机验证。
