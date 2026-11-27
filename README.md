@@ -4,6 +4,8 @@
 
 ![主界面](screenshots/dark-main.png)
 
+项目门户位于 [website/](website/README.md)。在工程根目录运行 `node website/serve.mjs` 后，打开 `http://127.0.0.1:4173` 可预览中文介绍页。
+
 ## 当前能力
 
 Windows 桌面和 Android 均支持建库、项目与三套账户编辑、搜索、排序、复制、修改主密码、恢复码、加密备份导出和外部密库导入预览与合并。详见 [能力与限制](docs/能力与限制.md)。
@@ -25,6 +27,7 @@ Windows 桌面和 Android 均支持建库、项目与三套账户编辑、搜索
 | scripts/ | 版本检查、Windows/Android 发布及产物校验 |
 | tests/ | 桌面 WebView 回归与规模测量 |
 | docs/ | 用户说明、维护记录和格式契约 |
+| website/ | 独立项目门户，可直接静态部署 |
 
 ## 构建与验证
 
